@@ -30,6 +30,13 @@ Route::middleware('auth')->group(function () {
 
     // Databases (MySQL & PostgreSQL)
     Route::resource('databases', DatabaseController::class)->only(['index', 'store', 'destroy']);
+    Route::get('/databases/{database}/studio', [DatabaseController::class, 'studio'])->name('databases.studio');
+    Route::post('/databases/{database}/studio/query', [DatabaseController::class, 'query'])->name('databases.studio.query');
+    Route::post('/databases/{database}/studio/create-table', [DatabaseController::class, 'createTable'])->name('databases.studio.create-table');
+    Route::post('/databases/{database}/studio/drop-table', [DatabaseController::class, 'dropTable'])->name('databases.studio.drop-table');
+    Route::get('/databases/{database}/studio/export', [DatabaseController::class, 'export'])->name('databases.studio.export');
+    Route::post('/databases/{database}/studio/import', [DatabaseController::class, 'import'])->name('databases.studio.import');
+    Route::get('/databases/{database}/manage', [DatabaseController::class, 'autologin'])->name('databases.autologin');
     Route::any('/database-manager', [DatabaseController::class, 'manager'])->name('databases.manager');
 
     // UFW Firewall
