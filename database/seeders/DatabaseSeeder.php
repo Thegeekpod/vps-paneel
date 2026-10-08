@@ -27,14 +27,17 @@ class DatabaseSeeder extends Seeder
             FirewallRule::create(['name' => 'SSH Remote Access', 'port' => '22', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '0.0.0.0/0']);
             FirewallRule::create(['name' => 'HTTP Web Traffic', 'port' => '80', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '0.0.0.0/0']);
             FirewallRule::create(['name' => 'HTTPS Secure Traffic', 'port' => '443', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '0.0.0.0/0']);
+            FirewallRule::create(['name' => 'MySQL Database', 'port' => '3306', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '127.0.0.1']);
+            FirewallRule::create(['name' => 'PostgreSQL Database', 'port' => '5432', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '127.0.0.1']);
             FirewallRule::create(['name' => 'Next.js App Default', 'port' => '3000', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '0.0.0.0/0']);
             FirewallRule::create(['name' => 'VPS Control Panel', 'port' => '8080', 'protocol' => 'tcp', 'action' => 'allow', 'from_ip' => '0.0.0.0/0']);
         }
 
-        // 3. Seed Sample Databases
+        // 3. Seed Sample Databases (MySQL & PostgreSQL)
         $wpDb = Database::firstOrCreate(
             ['name' => 'wp_agency_db'],
             [
+                'type' => 'mysql',
                 'username' => 'wp_agency_user',
                 'password' => 'WpSec#98124!Pass',
                 'host' => '127.0.0.1',
@@ -46,11 +49,24 @@ class DatabaseSeeder extends Seeder
         $larDb = Database::firstOrCreate(
             ['name' => 'saas_laravel_prod'],
             [
+                'type' => 'mysql',
                 'username' => 'saas_admin',
                 'password' => 'SaasSecure998$Key',
                 'host' => '127.0.0.1',
                 'port' => 3306,
                 'size_mb' => 28.5,
+            ]
+        );
+
+        $pgDb = Database::firstOrCreate(
+            ['name' => 'nextjs_prisma_pg'],
+            [
+                'type' => 'postgres',
+                'username' => 'postgres_user',
+                'password' => 'PgSecure#8812Pass',
+                'host' => '127.0.0.1',
+                'port' => 5432,
+                'size_mb' => 9.2,
             ]
         );
 

@@ -28,8 +28,9 @@ Route::middleware('auth')->group(function () {
     Route::post('sites/{site}/restart', [SiteController::class, 'restart'])->name('sites.restart');
     Route::post('sites/{site}/save-env', [SiteController::class, 'saveEnv'])->name('sites.save-env');
 
-    // MySQL Databases
+    // Databases (MySQL & PostgreSQL)
     Route::resource('databases', DatabaseController::class)->only(['index', 'store', 'destroy']);
+    Route::any('/database-manager', [DatabaseController::class, 'manager'])->name('databases.manager');
 
     // UFW Firewall
     Route::resource('firewall', FirewallController::class)->only(['index', 'store', 'destroy']);
