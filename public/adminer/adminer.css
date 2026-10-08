@@ -1,7 +1,7 @@
 /* ==============================================================================
-   VPS Paneel - Modern Sleek Dark Theme for Database Manager (Adminer)
-   Deep obsidian palette (#070b14, #0b101e, #0f172a), Indigo & Violet accents,
-   Inter & JetBrains Mono typography, smooth glass cards & modern controls
+   VPS Paneel - Modern Sleek Dark Theme for Database Manager
+   Aesthetic: Deep Obsidian (#070b14, #080d1a), Indigo/Violet Accents,
+   Inter & JetBrains Mono typography, Clean Card Containers & Sleek Controls
    ============================================================================== */
 
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
@@ -10,8 +10,7 @@
     --bg-base: #070b14;
     --bg-surface: #0b101e;
     --bg-elevated: #0f172a;
-    --bg-sidebar: #090e1a;
-    --bg-hover: rgba(99, 102, 241, 0.08);
+    --bg-sidebar: #080d1a;
     --border-color: rgba(255, 255, 255, 0.08);
     --border-light: rgba(255, 255, 255, 0.14);
     --border-focus: #6366f1;
@@ -27,25 +26,20 @@
 
     /* Adminer default CSS variable overrides */
     --bg: #070b14;
-    --dim: #0f172a;
+    --dim: #0b101e;
     --fg: #f8fafc;
     --lit: #1e1b4b;
 }
 
-/* Base resets */
+/* Base Resets */
 *, *::before, *::after {
     box-sizing: border-box;
 }
 
-html {
+html, body {
     background-color: var(--bg-base) !important;
     color: var(--text-primary) !important;
-}
-
-body {
-    background-color: var(--bg-base) !important;
-    color: var(--text-primary) !important;
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+    font-family: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     font-size: 13px !important;
     line-height: 1.5 !important;
     margin: 0 !important;
@@ -54,7 +48,7 @@ body {
     min-height: 100vh !important;
 }
 
-/* Custom Scrollbars */
+/* Scrollbars */
 ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -70,23 +64,25 @@ body {
     background: #334155;
 }
 
-/* Links */
-a, a:link, a:visited {
+/* Base Links */
+a {
     color: #818cf8 !important;
     text-decoration: none !important;
-    transition: color 0.15s ease, opacity 0.15s ease;
+    transition: color 0.15s ease;
 }
 a:hover {
-    color: #c7d2fe !important;
+    color: #a5b4fc !important;
     text-decoration: underline !important;
 }
 
-/* Left Sidebar Menu */
+/* ==============================================================================
+   LEFT SIDEBAR MENU (#menu)
+   ============================================================================== */
 #menu {
     position: fixed !important;
     top: 0 !important;
     left: 0 !important;
-    width: 260px !important;
+    width: 250px !important;
     height: 100vh !important;
     overflow-y: auto !important;
     background: var(--bg-sidebar) !important;
@@ -97,9 +93,14 @@ a:hover {
     box-sizing: border-box !important;
 }
 
+/* Hide adminer version info & iframe */
+#version, #menu h1 .version, #version iframe {
+    display: none !important;
+}
+
 #menu h1 {
     font-size: 1rem !important;
-    margin: 0 0 16px 0 !important;
+    margin: 0 0 14px 0 !important;
     padding: 0 0 12px 0 !important;
     border-bottom: 1px solid var(--border-color) !important;
 }
@@ -110,28 +111,12 @@ a:hover {
 }
 
 #menu p, #menu div {
-    margin: 0 0 12px 0 !important;
+    margin: 0 0 10px 0 !important;
     padding: 0 !important;
     border: none !important;
 }
 
-#menu p a {
-    display: flex !important;
-    align-items: center !important;
-    padding: 6px 10px !important;
-    border-radius: 6px !important;
-    color: var(--text-secondary) !important;
-    font-size: 12px !important;
-    font-weight: 500 !important;
-    margin-bottom: 3px !important;
-    transition: all 0.15s ease !important;
-    text-decoration: none !important;
-}
-#menu p a:hover {
-    background: rgba(255, 255, 255, 0.05) !important;
-    color: #ffffff !important;
-}
-
+/* Sidebar select dropdowns (DB & Schema) */
 #menu select {
     width: 100% !important;
     background: #0f172a !important;
@@ -144,6 +129,31 @@ a:hover {
     outline: none !important;
 }
 
+/* Sidebar vertical nav links (SQL command, Import, Export, Create table) */
+#menu p a {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    padding: 7px 12px !important;
+    border-radius: 8px !important;
+    color: var(--text-secondary) !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    margin-bottom: 3px !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    transform: none !important;
+    transition: all 0.15s ease !important;
+    text-decoration: none !important;
+}
+#menu p a:hover {
+    background: rgba(99, 102, 241, 0.12) !important;
+    color: #ffffff !important;
+    text-decoration: none !important;
+}
+
+/* Tables section in sidebar */
 #tables, #logins {
     border-top: 1px solid var(--border-color) !important;
     padding: 14px 0 0 0 !important;
@@ -156,12 +166,13 @@ a:hover {
 }
 
 #tables a, #logins a {
-    display: inline-block !important;
+    display: flex !important;
+    align-items: center !important;
     width: 100% !important;
     font-family: 'JetBrains Mono', monospace !important;
     font-size: 12px !important;
     color: #cbd5e1 !important;
-    padding: 5px 8px !important;
+    padding: 6px 10px !important;
     border-radius: 6px !important;
     text-decoration: none !important;
     background: transparent !important;
@@ -170,14 +181,24 @@ a:hover {
 }
 #tables a:hover, #logins a:hover {
     background: rgba(99, 102, 241, 0.15) !important;
-    color: #c7d2fe !important;
+    color: #818cf8 !important;
+}
+
+#menu .message, #menu p.message {
+    background: transparent !important;
+    border: none !important;
+    color: var(--text-muted) !important;
+    font-size: 11px !important;
+    padding: 6px 0 !important;
+    margin-top: 8px !important;
 }
 
 /* Language selector */
 #lang {
     position: static !important;
-    margin: 0 0 16px 0 !important;
-    padding: 0 !important;
+    margin: 16px 0 0 0 !important;
+    padding: 10px 0 0 0 !important;
+    border-top: 1px solid var(--border-color) !important;
     font-size: 11px !important;
     color: var(--text-muted) !important;
 }
@@ -191,27 +212,30 @@ a:hover {
     margin-left: 6px !important;
 }
 
-/* Main Content Area */
+/* ==============================================================================
+   MAIN WORKSPACE (#content)
+   ============================================================================== */
 #content {
-    margin-left: 260px !important;
-    padding: 24px 36px 40px !important;
+    margin-left: 250px !important;
+    padding: 28px 40px 60px !important;
     background: var(--bg-base) !important;
     min-height: 100vh !important;
     box-sizing: border-box !important;
+    position: relative !important;
 }
 
-/* Header Breadcrumb */
+/* Modern Top Breadcrumb */
 #breadcrumb {
     position: static !important;
     display: flex !important;
     align-items: center !important;
     flex-wrap: wrap !important;
     gap: 8px !important;
-    background: #0b1120 !important;
+    background: var(--bg-surface) !important;
     border: 1px solid var(--border-color) !important;
     border-radius: 12px !important;
     padding: 12px 18px !important;
-    color: var(--text-secondary) !important;
+    color: var(--text-muted) !important;
     font-size: 13px !important;
     margin: 0 0 24px 0 !important;
     height: auto !important;
@@ -220,23 +244,31 @@ a:hover {
 }
 
 #breadcrumb a {
-    color: #c7d2fe !important;
-    font-weight: 500 !important;
+    color: #818cf8 !important;
+    font-weight: 600 !important;
     text-decoration: none !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: inline !important;
+    box-shadow: none !important;
+    transform: none !important;
 }
 #breadcrumb a:hover {
-    color: #ffffff !important;
+    color: #a5b4fc !important;
     text-decoration: underline !important;
 }
 
-/* Logout widget in header */
+/* Logout Button */
 .logout {
     position: absolute !important;
-    top: 24px !important;
-    right: 36px !important;
+    top: 28px !important;
+    right: 40px !important;
     background: transparent !important;
     box-shadow: none !important;
     margin: 0 !important;
+    z-index: 10 !important;
 }
 .logout form, .logout p {
     margin: 0 !important;
@@ -248,14 +280,18 @@ a:hover {
     background: rgba(244, 63, 94, 0.1) !important;
     color: #fb7185 !important;
     border: 1px solid rgba(244, 63, 94, 0.25) !important;
-    padding: 5px 12px !important;
+    padding: 6px 14px !important;
     font-size: 11px !important;
-    border-radius: 6px !important;
+    font-weight: 600 !important;
+    border-radius: 8px !important;
     box-shadow: none !important;
+    cursor: pointer !important;
+    transition: all 0.15s ease !important;
 }
 .logout input[type="submit"]:hover {
     background: rgba(244, 63, 94, 0.2) !important;
-    color: #fff !important;
+    color: #ffffff !important;
+    transform: translateY(-1px) !important;
 }
 
 /* Headings */
@@ -274,7 +310,6 @@ h2 {
     line-height: 1.3 !important;
 }
 
-/* Eliminate Adminer default purple banner on h2 */
 div#content > h2:first-of-type {
     background: transparent !important;
     color: #ffffff !important;
@@ -288,71 +323,67 @@ h3 {
     font-weight: 600 !important;
 }
 
-/* Action Links Pills */
-p.links, .links {
+/* Action Links Toolbar (Alter schema, Create table, Create view, etc.) */
+p.links, .links, #content > p:has(a:not(#breadcrumb a)) {
     margin: 12px 0 !important;
     display: flex !important;
     flex-wrap: wrap !important;
     gap: 8px !important;
 }
 
-p.links a, .links a, #content > p a:not([class]) {
+p.links a, .links a {
     display: inline-flex !important;
     align-items: center !important;
     gap: 6px !important;
-    background: rgba(99, 102, 241, 0.1) !important;
-    color: #a5b4fc !important;
-    border: 1px solid rgba(99, 102, 241, 0.25) !important;
-    padding: 6px 14px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    color: #cbd5e1 !important;
+    border: 1px solid var(--border-color) !important;
+    padding: 7px 14px !important;
     border-radius: 8px !important;
     font-size: 12px !important;
     font-weight: 500 !important;
     text-decoration: none !important;
     margin-right: 0 !important;
     margin-bottom: 0 !important;
+    box-shadow: none !important;
     transition: all 0.15s ease !important;
 }
-p.links a:hover, .links a:hover, #content > p a:not([class]):hover {
-    background: rgba(99, 102, 241, 0.22) !important;
-    border-color: rgba(99, 102, 241, 0.45) !important;
+p.links a:hover, .links a:hover {
+    background: rgba(99, 102, 241, 0.18) !important;
+    border-color: rgba(99, 102, 241, 0.4) !important;
     color: #ffffff !important;
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.25) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 12px rgba(99, 102, 241, 0.2) !important;
     text-decoration: none !important;
 }
 
-/* Message Banners */
-.message, p.message, div.message {
-    background: rgba(16, 185, 129, 0.1) !important;
-    color: #34d399 !important;
-    border: 1px solid rgba(16, 185, 129, 0.25) !important;
-    border-radius: 10px !important;
-    padding: 12px 16px !important;
-    margin: 16px 0 !important;
+/* Notice / Empty State / Success Messages */
+.message, p.message {
+    background: rgba(15, 23, 42, 0.6) !important;
+    color: var(--text-secondary) !important;
+    border: 1px dashed var(--border-color) !important;
+    border-radius: 12px !important;
+    padding: 16px 20px !important;
+    margin: 14px 0 20px 0 !important;
     font-size: 13px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 10px !important;
 }
 
-.error, p.error, div.error {
+.error, p.error {
     background: rgba(244, 63, 94, 0.1) !important;
     color: #fb7185 !important;
     border: 1px solid rgba(244, 63, 94, 0.25) !important;
-    border-radius: 10px !important;
-    padding: 12px 16px !important;
+    border-radius: 12px !important;
+    padding: 14px 18px !important;
     margin: 16px 0 !important;
     font-size: 13px !important;
 }
 
-/* Empty tables alert "No tables." */
-#content > p:not(.message):not(.error):not(.links):not(#breadcrumb) {
-    background: rgba(255, 255, 255, 0.02) !important;
-    border: 1px dashed var(--border-color) !important;
-    border-radius: 10px !important;
-    padding: 14px 18px !important;
-    color: var(--text-muted) !important;
-    margin: 12px 0 20px 0 !important;
-}
-
-/* Modern Tables Styling */
+/* ==============================================================================
+   TABLES & DATA GRIDS
+   ============================================================================== */
 table {
     border-collapse: separate !important;
     border-spacing: 0 !important;
@@ -372,7 +403,7 @@ thead th, th {
     font-weight: 600 !important;
     text-transform: uppercase !important;
     letter-spacing: 0.05em !important;
-    padding: 12px 14px !important;
+    padding: 12px 16px !important;
     border-bottom: 1px solid var(--border-color) !important;
     border-top: none !important;
     border-left: none !important;
@@ -388,11 +419,11 @@ tbody tr:nth-child(even) {
     background: rgba(255, 255, 255, 0.015) !important;
 }
 tbody tr:hover {
-    background: var(--bg-hover) !important;
+    background: rgba(99, 102, 241, 0.06) !important;
 }
 
 td {
-    padding: 11px 14px !important;
+    padding: 11px 16px !important;
     border-bottom: 1px solid rgba(255, 255, 255, 0.04) !important;
     border-top: none !important;
     border-left: none !important;
@@ -401,30 +432,45 @@ td {
     font-size: 12px !important;
 }
 
+td a {
+    color: #818cf8 !important;
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    display: inline !important;
+    box-shadow: none !important;
+    transform: none !important;
+}
+td a:hover {
+    color: #c7d2fe !important;
+    text-decoration: underline !important;
+}
+
 td a[href*="select="], td a[href*="table="], td.number, .jush-sql {
     font-family: 'JetBrains Mono', monospace !important;
 }
 
-/* Primary Action Buttons */
+/* Buttons */
 input[type="submit"], button, .button {
     background: linear-gradient(135deg, #4f46e5 0%, #6366f1 100%) !important;
     color: #ffffff !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border: 1px solid rgba(255, 255, 255, 0.15) !important;
     border-radius: 8px !important;
-    padding: 7px 16px !important;
+    padding: 8px 18px !important;
     font-size: 12px !important;
     font-weight: 600 !important;
     cursor: pointer !important;
-    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.25) !important;
+    box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3) !important;
     transition: all 0.15s ease !important;
 }
 input[type="submit"]:hover, button:hover {
     background: linear-gradient(135deg, #4338ca 0%, #4f46e5 100%) !important;
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.35) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 6px 16px rgba(79, 70, 229, 0.45) !important;
 }
 
-/* Form Inputs */
+/* Inputs & Form Controls */
 input[type="text"], input[type="password"], input[type="number"], select, textarea {
     background: rgba(255, 255, 255, 0.03) !important;
     color: #f8fafc !important;
@@ -433,12 +479,12 @@ input[type="text"], input[type="password"], input[type="number"], select, textar
     padding: 8px 12px !important;
     font-size: 12px !important;
     outline: none !important;
-    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+    transition: all 0.15s ease !important;
     box-sizing: border-box !important;
 }
 input[type="text"]:focus, input[type="password"]:focus, select:focus, textarea:focus {
     border-color: var(--border-focus) !important;
-    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2) !important;
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.25) !important;
     background: rgba(255, 255, 255, 0.05) !important;
 }
 select option {
@@ -446,7 +492,7 @@ select option {
     color: #f8fafc !important;
 }
 
-/* SQL Query Runner & Code Blocks */
+/* SQL Query Editor */
 textarea[name="query"], pre, code, .sqlarea {
     font-family: 'JetBrains Mono', monospace !important;
     background: #030712 !important;
@@ -459,25 +505,17 @@ textarea[name="query"], pre, code, .sqlarea {
     width: 100% !important;
 }
 
-/* Login Table Form Customizer */
-table.layout {
-    max-width: 480px;
-    margin: 40px auto;
-    background: #0b101e !important;
+/* Fieldset */
+fieldset {
     border: 1px solid var(--border-color) !important;
-    padding: 24px;
-    border-radius: 16px !important;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5) !important;
+    border-radius: 12px !important;
+    padding: 16px 20px !important;
+    background: var(--bg-surface) !important;
+    margin: 16px 0 !important;
 }
-table.layout th {
-    background: transparent !important;
-    border: none !important;
+legend {
+    color: #cbd5e1 !important;
+    font-weight: 600 !important;
+    padding: 0 8px !important;
     font-size: 12px !important;
-    width: 100px;
-}
-table.layout td {
-    border: none !important;
-}
-table.layout input[type="text"], table.layout input[type="password"] {
-    width: 100%;
 }
