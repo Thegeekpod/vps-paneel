@@ -2,6 +2,7 @@
 
 namespace App\Filament\Widgets;
 
+use App\Models\BackupSnapshot;
 use App\Models\Database;
 use App\Models\Domain;
 use App\Models\Mailbox;
@@ -13,6 +14,7 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
 class QuickStatsWidget extends BaseWidget
 {
     protected static ?int $sort = 1;
+    protected int | string | array $columnSpan = 'full';
 
     protected function getStats(): array
     {
@@ -22,6 +24,7 @@ class QuickStatsWidget extends BaseWidget
         $activeSsl = SslCertificate::where('status', 'active')->count();
         $totalDbs = Database::count();
         $totalMailboxes = Mailbox::count();
+        $totalBackups = BackupSnapshot::count();
 
         return [
             Stat::make('Hosted Websites', "{$activeWebsites} / {$totalWebsites}")
@@ -48,6 +51,11 @@ class QuickStatsWidget extends BaseWidget
                 ->description('Active virtual accounts')
                 ->descriptionIcon('heroicon-m-envelope')
                 ->color('warning'),
+
+            Stat::make('Restic Backups', $totalBackups)
+                ->description('Total repository snapshots')
+                ->descriptionIcon('heroicon-m-archive-box')
+                ->color('success'),
         ];
     }
 }

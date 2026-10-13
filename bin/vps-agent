@@ -34,6 +34,7 @@ class VpsServerAgent
         'SystemStatus',
         'ManageService',
         'ManageFirewall',
+        'UpdatePanel',
     ];
 
     private const ALLOWED_SERVICES = [
@@ -854,6 +855,92 @@ EOT;
             $status[$svc] = trim($res['output']) === 'active' ? 'active' : 'inactive';
         }
         return $status;
+    }
+
+    private function handleUpdatePanel(array $payload): array
+    {
+        $branch = preg_replace('/[^a-zA-Z0-9_\-\.\/]/', '', $payload['branch'] ?? 'main');
+        $installDir = '/var/www/vps-panel';
+        if (! is_dir($installDir)) {
+            $installDir = dirname(__DIR__);
+        }
+
+        $this->log("Initiating server panel update in {$installDir} for branch: {$branch}");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Git safe directory configured, pulled latest {$branch}");
+            $this->log("[SIMULATE] Permissions normalized, migrations and cache clear run successfully");
+            return [
+                'success' => true,
+                'branch' => $branch,
+                'output' => 'Simulated panel update completed successfully',
+            ];
+        }
+
+        // 1. Configure git safe directory globally for root and all users
+        $this->execCommand('git', ['config', '--system', '--add', 'safe.directory', $installDir]);
+        $this->execCommand('git', ['config', '--global', '--add', 'safe.directory', $installDir]);
+
+        // 2. Fetch and Pull
+        $fetchRes = $this->execCommand('git', ['-C', $installDir, 'fetch', 'origin', $branch]);
+        $this->log("git fetch: " . trim($fetchRes['output'] ?: 'ok'));
+
+        $pullRes = $this->execCommand('git', ['-C', $installDir, 'pull', 'origin', $branch]);
+        $this->log("git pull: " . trim($pullRes['output']));
+        if ($pullRes['exitCode'] !== 0) {
+            throw new \RuntimeException("git pull failed with code {$pullRes['exitCode']}: " . $pullRes['output']);
+        }
+
+        // Self-update /usr/local/bin/vps-agent with newly pulled version
+        if (file_exists("{$installDir}/bin/vps-agent")) {
+            $this->execCommand('cp', ["{$installDir}/bin/vps-agent", '/usr/local/bin/vps-agent']);
+            $this->execCommand('chmod', ['750', '/usr/local/bin/vps-agent']);
+        }
+
+        // 3. Fix permissions so web server www-data has full access
+        $this->execCommand('chown', ['-R', 'www-data:www-data', "{$installDir}/database", "{$installDir}/storage", "{$installDir}/bootstrap/cache"]);
+        $this->execCommand('chmod', ['-R', '777', "{$installDir}/database", "{$installDir}/storage", "{$installDir}/bootstrap/cache"]);
+        if (file_exists("{$installDir}/database/database.sqlite")) {
+            $this->execCommand('chmod', ['666', "{$installDir}/database/database.sqlite"]);
+        }
+
+        // 4. Run composer install if composer is available and lock changed
+        $composerBin = is_executable('/usr/local/bin/composer') ? '/usr/local/bin/composer' : 'composer';
+        $composerRes = $this->execCommand($composerBin, ['install', '--no-dev', '--optimize-autoloader', '--no-interaction', '--working-dir=' . $installDir]);
+        $this->log("composer install: " . trim($composerRes['output']));
+
+        // 5. Run Artisan migrate --force
+        $phpBin = PHP_BINARY ?: 'php';
+        $migrateRes = $this->execCommand($phpBin, ["{$installDir}/artisan", 'migrate', '--force']);
+        $this->log("artisan migrate: " . trim($migrateRes['output']));
+        if ($migrateRes['exitCode'] !== 0) {
+            throw new \RuntimeException("artisan migrate failed: " . $migrateRes['output']);
+        }
+
+        // 6. Clear all caches
+        $clearRes = $this->execCommand($phpBin, ["{$installDir}/artisan", 'optimize:clear']);
+        $this->log("optimize:clear: " . trim($clearRes['output']));
+
+        // 7. Publish Filament assets
+        $assetRes = $this->execCommand($phpBin, ["{$installDir}/artisan", 'filament:assets']);
+        $this->log("filament:assets: " . trim($assetRes['output']));
+
+        // 8. Re-normalize permissions after caches were cleared
+        $this->execCommand('chown', ['-R', 'www-data:www-data', "{$installDir}/bootstrap/cache", "{$installDir}/storage"]);
+        $this->execCommand('chmod', ['-R', '777', "{$installDir}/bootstrap/cache", "{$installDir}/storage"]);
+
+        // 9. Restart queue workers and reload PHP-FPM
+        $this->execCommand($phpBin, ["{$installDir}/artisan", 'queue:restart']);
+        $this->execCommand('systemctl', ['reload', 'php8.4-fpm']);
+        $this->execCommand('systemctl', ['reload', 'php8.3-fpm']);
+
+        return [
+            'success' => true,
+            'branch' => $branch,
+            'git_output' => $pullRes['output'],
+            'migrate_output' => $migrateRes['output'],
+            'clear_output' => $clearRes['output'],
+        ];
     }
 
     /* -------------------------------------------------------------------------

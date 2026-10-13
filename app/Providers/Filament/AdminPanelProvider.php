@@ -34,6 +34,7 @@ class AdminPanelProvider extends PanelProvider
                 'primary' => Color::Indigo,
                 'gray' => Color::Slate,
             ])
+            ->maxContentWidth(\Filament\Support\Enums\MaxWidth::Full)
             ->sidebarCollapsibleOnDesktop()
             ->navigationGroups([
                 'Hosting',

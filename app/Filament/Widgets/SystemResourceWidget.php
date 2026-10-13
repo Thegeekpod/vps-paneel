@@ -10,6 +10,7 @@ class SystemResourceWidget extends BaseWidget
 {
     protected static ?int $sort = 2;
     protected static ?string $pollingInterval = '10s';
+    protected int | string | array $columnSpan = 'full';
 
     protected function getStats(): array
     {

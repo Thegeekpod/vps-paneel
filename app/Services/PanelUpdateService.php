@@ -71,8 +71,41 @@ class PanelUpdateService
         $logs[] = "Starting Panel Update process for branch: {$branch}";
         $logs[] = "Current commit: {$versionBefore['hash']} ({$versionBefore['message']})";
 
+        // If on Linux and privileged agent is configured, delegate to root agent
+        if (PHP_OS_FAMILY === 'Linux') {
+            try {
+                $agent = app(ServerAgentService::class);
+                $agentResult = $agent->execute('UpdatePanel', ['branch' => $branch], 'System', $versionBefore['hash']);
+                $versionAfter = $this->getCurrentVersion();
+                $durationMs = (int) round((microtime(true) - $startTime) * 1000);
+
+                return [
+                    'success' => true,
+                    'previous_hash' => $versionBefore['hash'],
+                    'new_hash' => $versionAfter['hash'],
+                    'logs' => array_merge($logs, [
+                        '[git pull]: ' . ($agentResult['git_output'] ?? 'Completed'),
+                        '[migrate]: ' . ($agentResult['migrate_output'] ?? 'Completed'),
+                        '[cache clear]: ' . ($agentResult['clear_output'] ?? 'Completed'),
+                    ]),
+                    'duration_ms' => $durationMs,
+                ];
+            } catch (\Throwable $e) {
+                // If agent threw an error, log and attempt direct fallback or rethrow
+                $logs[] = "[agent error]: " . $e->getMessage();
+                throw new \RuntimeException("Server Agent update failed: " . $e->getMessage(), 0, $e);
+            }
+        }
+
+        // Direct Execution Fallback (Local / Non-Linux)
+        // Ensure git safe directory is configured
+        $this->runCommand(['git', 'config', '--global', '--add', 'safe.directory', $base], $base);
+
         // Step 1: Git Pull
         $pull = $this->runCommand(['git', 'pull', 'origin', $branch], $base);
+        if ($pull['exitCode'] !== 0) {
+            throw new \RuntimeException("Git pull failed: " . ($pull['output'] ?: 'Unknown git error'));
+        }
         $logs[] = "[git pull]: " . ($pull['output'] ?: 'Up to date');
 
         // Step 2: Composer install (if vendor exists)
@@ -87,6 +120,7 @@ class PanelUpdateService
             $logs[] = "[artisan migrate]: " . trim(Artisan::output());
         } catch (\Throwable $e) {
             $logs[] = "[artisan migrate error]: " . $e->getMessage();
+            throw new \RuntimeException("Migration failed: " . $e->getMessage(), 0, $e);
         }
 
         // Step 4: Publish Filament assets
@@ -94,7 +128,7 @@ class PanelUpdateService
             Artisan::call('filament:assets');
             $logs[] = "[filament assets]: Published assets";
         } catch (\Throwable $e) {
-            $logs[] = "[filament assets error]: " . $e->getMessage();
+            $logs[] = "[filament assets warning]: " . $e->getMessage();
         }
 
         // Step 5: Clear and optimize caches
@@ -110,7 +144,7 @@ class PanelUpdateService
             Artisan::call('queue:restart');
             $logs[] = "[queue]: Queue workers notified to restart";
         } catch (\Throwable $e) {
-            $logs[] = "[queue error]: " . $e->getMessage();
+            $logs[] = "[queue warning]: " . $e->getMessage();
         }
 
         $versionAfter = $this->getCurrentVersion();
