@@ -91,20 +91,22 @@ class PanelUpdateService
                     'duration_ms' => $durationMs,
                 ];
             } catch (\Throwable $e) {
-                // If agent threw an error, log and attempt direct fallback or rethrow
-                $logs[] = "[agent error]: " . $e->getMessage();
-                throw new \RuntimeException("Server Agent update failed: " . $e->getMessage(), 0, $e);
+                // If agent threw an error, log and proceed with direct git fallback
+                $logs[] = "[agent notice]: " . $e->getMessage() . " - falling back to direct git update";
             }
         }
 
-        // Direct Execution Fallback (Local / Non-Linux)
-        // Ensure git safe directory is configured
-        $this->runCommand(['git', 'config', '--global', '--add', 'safe.directory', $base], $base);
-
-        // Step 1: Git Pull
-        $pull = $this->runCommand(['git', 'pull', 'origin', $branch], $base);
+        // Direct Execution Fallback
+        // Step 1: Git Pull with explicit safe.directory flag
+        $pull = $this->runCommand(['git', '-c', 'safe.directory=*', 'pull', 'origin', $branch], $base);
         if ($pull['exitCode'] !== 0) {
-            throw new \RuntimeException("Git pull failed: " . ($pull['output'] ?: 'Unknown git error'));
+            // Also try simple git pull
+            $fallbackPull = $this->runCommand(['git', '-c', 'safe.directory=*', 'pull'], $base);
+            if ($fallbackPull['exitCode'] === 0) {
+                $pull = $fallbackPull;
+            } else {
+                throw new \RuntimeException("Git pull failed: " . ($pull['output'] ?: $fallbackPull['output']));
+            }
         }
         $logs[] = "[git pull]: " . ($pull['output'] ?: 'Up to date');
 
@@ -182,7 +184,11 @@ class PanelUpdateService
 
     protected function runCommand(array $command, string $cwd): array
     {
-        $process = new Process($command, $cwd);
+        $process = new Process($command, $cwd, [
+            'HOME' => '/var/www',
+            'GIT_TERMINAL_PROMPT' => '0',
+            'PATH' => '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin',
+        ]);
         $process->setTimeout(180);
         $process->run();
 
