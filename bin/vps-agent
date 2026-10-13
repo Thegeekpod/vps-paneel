@@ -566,6 +566,10 @@ EOT;
             ];
         }
 
+        $this->ensureDirectory('/etc/letsencrypt', 'root', 'root', 0755);
+        $this->ensureDirectory('/var/log/letsencrypt', 'root', 'root', 0755);
+        $this->ensureDirectory('/var/lib/letsencrypt', 'root', 'root', 0755);
+
         $res = $this->execCommand("certbot", [
             'certonly',
             '--webroot',
@@ -575,6 +579,9 @@ EOT;
             '--agree-tos',
             '--email', $email,
             '--keep-until-expiring',
+            '--config-dir', '/etc/letsencrypt',
+            '--logs-dir', '/var/log/letsencrypt',
+            '--work-dir', '/var/lib/letsencrypt',
         ]);
 
         if ($res['exitCode'] !== 0) {

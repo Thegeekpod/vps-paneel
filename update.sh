@@ -31,10 +31,29 @@ EOF
 chmod 440 /etc/sudoers.d/vps-panel-agent
 visudo -c -f /etc/sudoers.d/vps-panel-agent
 
-echo "[-] 4/7 Removing default conflicting Nginx site..."
+echo "[-] 4/8 Removing default conflicting Nginx site..."
 rm -f /etc/nginx/sites-enabled/default
 
-echo "[-] 5/7 Synchronizing file permissions across all websites (aaPanel-style)..."
+echo "[-] 5/8 Configuring PHP-FPM systemd overrides (allowing /etc, /home and Let's Encrypt write access)..."
+for ver in 8.2 8.3 8.4; do
+    if systemctl list-unit-files "php${ver}-fpm.service" 2>/dev/null | grep -q "php${ver}-fpm"; then
+        mkdir -p "/etc/systemd/system/php${ver}-fpm.service.d"
+        cat > "/etc/systemd/system/php${ver}-fpm.service.d/override.conf" << 'EOFOVERRIDE'
+[Service]
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=false
+ReadWritePaths=/etc /home /var /tmp /run
+EOFOVERRIDE
+    fi
+done
+systemctl daemon-reload
+
+echo "[-] 6/8 Ensuring Let's Encrypt and Certbot directories exist..."
+mkdir -p /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt
+chmod 755 /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt
+
+echo "[-] 7/8 Synchronizing file permissions across all websites (aaPanel-style)..."
 /usr/local/bin/vps-agent --action=ManageWebsiteFile --payload='{"action":"fix_permissions_all"}' || true
 
 # Also ensure panel writable dirs
@@ -42,15 +61,14 @@ chown -R www-data:www-data "$PANEL_DIR/database" "$PANEL_DIR/storage" "$PANEL_DI
 chmod -R 775 "$PANEL_DIR/database" "$PANEL_DIR/storage" "$PANEL_DIR/bootstrap/cache"
 chmod 666 "$PANEL_DIR/database/database.sqlite" 2>/dev/null || true
 
-echo "[-] 6/7 Clearing caches and optimizing..."
+echo "[-] 8/8 Clearing caches and restarting services..."
 sudo -u www-data php artisan optimize:clear
 sudo -u www-data php artisan config:cache
 sudo -u www-data php artisan route:cache
 sudo -u www-data php artisan view:cache
 
-echo "[-] 7/7 Testing and reloading web server..."
 nginx -t && systemctl reload nginx
-systemctl reload php8.3-fpm 2>/dev/null || systemctl restart php8.3-fpm 2>/dev/null || true
+systemctl restart php8.3-fpm 2>/dev/null || systemctl reload php8.3-fpm 2>/dev/null || true
 
 echo ""
 echo "=============================================================================="

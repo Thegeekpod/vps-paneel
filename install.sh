@@ -380,6 +380,17 @@ rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/vps-panel.conf /etc/nginx/sites-enabled/vps-panel.conf
 nginx -t
 
+# Configure PHP-FPM systemd override to allow write access to /etc and /home (Let's Encrypt & vhosts)
+mkdir -p "/etc/systemd/system/php${PHP_VERSION}-fpm.service.d"
+cat > "/etc/systemd/system/php${PHP_VERSION}-fpm.service.d/override.conf" << 'EOFOVERRIDE'
+[Service]
+ProtectSystem=false
+ProtectHome=false
+PrivateTmp=false
+ReadWritePaths=/etc /home /var /tmp /run
+EOFOVERRIDE
+systemctl daemon-reload
+
 # Ensure PHP-FPM and Nginx are started and enabled
 systemctl restart php${PHP_VERSION}-fpm || systemctl start php${PHP_VERSION}-fpm
 systemctl enable php${PHP_VERSION}-fpm 2>/dev/null || true
