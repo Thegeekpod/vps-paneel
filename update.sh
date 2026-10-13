@@ -31,8 +31,23 @@ EOF
 chmod 440 /etc/sudoers.d/vps-panel-agent
 visudo -c -f /etc/sudoers.d/vps-panel-agent
 
-echo "[-] 4/8 Removing default conflicting Nginx site..."
+echo "[-] 4/8 Setting up default port 80 catch-all site so port 80 is never refused..."
 rm -f /etc/nginx/sites-enabled/default
+
+cat > /etc/nginx/sites-available/00-default-catchall.conf << 'EOFDEFAULT'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root /var/www/vps-panel/public/default-site;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOFDEFAULT
+ln -sf /etc/nginx/sites-available/00-default-catchall.conf /etc/nginx/sites-enabled/00-default-catchall.conf
 
 echo "[-] 5/8 Configuring PHP-FPM systemd overrides (allowing /etc, /home and Let's Encrypt write access)..."
 for ver in 8.2 8.3 8.4; do
@@ -67,7 +82,7 @@ sudo -u www-data php artisan config:cache
 sudo -u www-data php artisan route:cache
 sudo -u www-data php artisan view:cache
 
-nginx -t && systemctl reload nginx
+nginx -t && (systemctl restart nginx || systemctl start nginx)
 systemctl restart php8.3-fpm 2>/dev/null || systemctl reload php8.3-fpm 2>/dev/null || true
 
 echo ""

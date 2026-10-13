@@ -378,6 +378,21 @@ EOF
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/vps-panel.conf /etc/nginx/sites-enabled/vps-panel.conf
+
+cat > /etc/nginx/sites-available/00-default-catchall.conf << 'EOFDEFAULT'
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+    root ${INSTALL_DIR}/public/default-site;
+    index index.html;
+
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}
+EOFDEFAULT
+ln -sf /etc/nginx/sites-available/00-default-catchall.conf /etc/nginx/sites-enabled/00-default-catchall.conf
 nginx -t
 
 # Configure PHP-FPM systemd override to allow write access to /etc and /home (Let's Encrypt & vhosts)
