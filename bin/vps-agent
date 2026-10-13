@@ -35,6 +35,7 @@ class VpsServerAgent
         'ManageService',
         'ManageFirewall',
         'UpdatePanel',
+        'ManageWebsiteFile',
     ];
 
     private const ALLOWED_SERVICES = [
@@ -164,8 +165,10 @@ class VpsServerAgent
             $this->log("Created system user: {$user}");
         }
 
-        // 2. Create web directory structure
-        $this->ensureDirectory($publicHtml, $user, $user, 0755);
+        // 2. Create web directory structure with www-data group access for File Manager
+        $this->ensureDirectory("{$homeDir}/web", $user, 'www-data', 0775);
+        $this->ensureDirectory("{$homeDir}/web/{$domain}", $user, 'www-data', 0775);
+        $this->ensureDirectory($publicHtml, $user, 'www-data', 0775);
         $this->ensureDirectory($logsDir, $user, $user, 0750);
         $this->ensureDirectory("{$homeDir}/tmp", $user, $user, 0700);
 
@@ -177,7 +180,8 @@ class VpsServerAgent
                 . "<h1>Welcome to {$domain}</h1><p>Website hosted successfully on VPS Control Panel.</p></body></html>";
             file_put_contents($indexFile, $defaultHtml);
             chown($indexFile, $user);
-            chgrp($indexFile, $user);
+            chgrp($indexFile, 'www-data');
+            chmod($indexFile, 0664);
         }
 
         // 3. Write PHP-FPM pool configuration
@@ -715,6 +719,64 @@ EOT;
             'exit_code' => $res['exitCode'],
             'status' => trim($statusCheck['output']),
         ];
+    }
+
+    private function handleManageWebsiteFile(array $payload): array
+    {
+        $action = $payload['action'] ?? 'write'; // write, delete, mkdir, fix_permissions
+        $path = $this->validateSafePath($payload['path'] ?? '');
+        $user = ! empty($payload['user']) ? $this->validateUsername($payload['user']) : null;
+        $content = $payload['content'] ?? '';
+
+        // Security check: Must be inside /home/
+        if (! str_starts_with($path, '/home/') && ! str_starts_with($path, storage_path())) {
+            throw new \InvalidArgumentException("ManageWebsiteFile only allowed inside /home/ directories");
+        }
+
+        $this->log("Managing website file: action {$action}, path {$path}, user {$user}");
+
+        if ($this->simulate) {
+            return ['success' => true, 'action' => $action, 'path' => $path];
+        }
+
+        if ($action === 'write') {
+            $dir = dirname($path);
+            if (! is_dir($dir)) {
+                mkdir($dir, 0775, true);
+                if ($user && $this->userExists($user)) {
+                    @chown($dir, $user);
+                    @chgrp($dir, 'www-data');
+                }
+            }
+            file_put_contents($path, $content);
+            chmod($path, 0664);
+            if ($user && $this->userExists($user)) {
+                @chown($path, $user);
+                @chgrp($path, 'www-data');
+            }
+        } elseif ($action === 'delete') {
+            if (is_dir($path)) {
+                $this->execCommand('rm', ['-rf', $path]);
+            } elseif (file_exists($path)) {
+                unlink($path);
+            }
+        } elseif ($action === 'mkdir') {
+            if (! is_dir($path)) {
+                mkdir($path, 0775, true);
+                if ($user && $this->userExists($user)) {
+                    @chown($path, $user);
+                    @chgrp($path, 'www-data');
+                }
+            }
+        } elseif ($action === 'fix_permissions') {
+            if ($user && is_dir("/home/{$user}/web")) {
+                $this->execCommand('chown', ['-R', "{$user}:www-data", "/home/{$user}/web"]);
+                $this->execCommand('chmod', ['-R', '775', "/home/{$user}/web"]);
+                $this->execCommand('find', ["/home/{$user}/web", '-type', 'f', '-exec', 'chmod', '664', '{}', '+']);
+            }
+        }
+
+        return ['success' => true, 'action' => $action, 'path' => $path];
     }
 
     private function handleManageFirewall(array $payload): array
