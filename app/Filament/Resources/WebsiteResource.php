@@ -116,6 +116,34 @@ class WebsiteResource extends Resource
                     ->color('info')
                     ->url(fn(Website $record): string => route('filament.admin.pages.file-manager', ['selectedWebsiteId' => $record->id])),
 
+                Tables\Actions\Action::make('sync_vhost')
+                    ->label('Sync Vhost')
+                    ->icon('heroicon-o-arrow-path')
+                    ->color('warning')
+                    ->tooltip('Re-generate Nginx vhost & PHP-FPM pool and reload web server')
+                    ->action(function (Website $record, \App\Services\ServerAgentService $agent) {
+                        try {
+                            $agent->execute('CreateWebsite', [
+                                'domain' => $record->primary_domain,
+                                'username' => $record->system_user,
+                                'php_version' => $record->php_version ?? '8.3',
+                            ], 'Website', (string) $record->id);
+
+                            $record->update(['status' => \App\Enums\WebsiteStatus::Active]);
+                            \Filament\Notifications\Notification::make()
+                                ->title('VirtualHost Synchronized')
+                                ->body("Nginx & PHP-FPM configured and reloaded for {$record->primary_domain}")
+                                ->success()
+                                ->send();
+                        } catch (\Throwable $e) {
+                            \Filament\Notifications\Notification::make()
+                                ->title('Sync Failed')
+                                ->body($e->getMessage())
+                                ->danger()
+                                ->send();
+                        }
+                    }),
+
                 Tables\Actions\Action::make('issue_ssl')
                     ->label('Issue SSL')
                     ->icon('heroicon-o-shield-check')

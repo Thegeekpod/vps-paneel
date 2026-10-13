@@ -68,8 +68,15 @@ echo "[-] 6/8 Ensuring Let's Encrypt and Certbot directories exist..."
 mkdir -p /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt
 chmod 755 /etc/letsencrypt /var/log/letsencrypt /var/lib/letsencrypt
 
-echo "[-] 7/8 Synchronizing file permissions across all websites (aaPanel-style)..."
-/usr/local/bin/vps-agent --action=ManageWebsiteFile --payload='{"action":"fix_permissions_all"}' || true
+echo "[-] 7/8 Synchronizing all website virtual hosts and permissions (aaPanel-style)..."
+sudo -u www-data php artisan vps:sync-websites || true
+
+# Ensure all available website configs are symlinked to enabled
+for conf in /etc/nginx/sites-available/*.conf; do
+    if [[ -f "$conf" && "$(basename "$conf")" != "default" ]]; then
+        ln -sf "$conf" "/etc/nginx/sites-enabled/$(basename "$conf")"
+    fi
+done
 
 # Also ensure panel writable dirs
 chown -R www-data:www-data "$PANEL_DIR/database" "$PANEL_DIR/storage" "$PANEL_DIR/bootstrap/cache"
