@@ -259,10 +259,12 @@ visudo -c -f /etc/sudoers.d/vps-panel-agent || {
 # ------------------------------------------------------------------------------
 # 6. Panel Codebase Setup
 # ------------------------------------------------------------------------------
-echo "[-] Copying and configuring VPS Control Panel application..."
-
 cp -rn "$SCRIPT_DIR"/* "$INSTALL_DIR/" || true
+cp -rn "$SCRIPT_DIR"/.[!.]* "$INSTALL_DIR/" 2>/dev/null || true
 cp "$SCRIPT_DIR/.env.example" "$INSTALL_DIR/.env" 2>/dev/null || true
+
+# Mark directory safe for Git
+git config --system --add safe.directory "$INSTALL_DIR" 2>/dev/null || true
 
 cd "$INSTALL_DIR"
 
