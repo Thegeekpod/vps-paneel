@@ -248,6 +248,7 @@ chown "root:$PANEL_USER" /usr/local/bin/vps-agent
 cat > /etc/sudoers.d/vps-panel-agent << EOF
 # Strict allowlist: VPS Panel Agent
 $PANEL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/vps-agent
+www-data ALL=(ALL) NOPASSWD: /usr/local/bin/vps-agent
 EOF
 chmod 440 /etc/sudoers.d/vps-panel-agent
 visudo -c -f /etc/sudoers.d/vps-panel-agent || {
