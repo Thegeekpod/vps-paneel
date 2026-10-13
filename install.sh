@@ -135,6 +135,24 @@ fi
 echo "[-] Updating package lists and installing core dependencies..."
 export DEBIAN_FRONTEND=noninteractive
 
+# Free port 53 from systemd-resolved so PowerDNS can bind to it
+if [[ -f /etc/systemd/resolved.conf ]]; then
+    mkdir -p /etc/systemd/resolved.conf.d
+    cat > /etc/systemd/resolved.conf.d/pdns.conf << 'EOF'
+[Resolve]
+DNSStubListener=no
+DNS=1.1.1.1 8.8.8.8
+EOF
+    systemctl restart systemd-resolved 2>/dev/null || true
+fi
+
+# Prevent services from failing apt triggers before they are configured
+cat > /usr/sbin/policy-rc.d << 'EOF'
+#!/bin/sh
+exit 101
+EOF
+chmod +x /usr/sbin/policy-rc.d
+
 apt-get update -y
 apt-get install -y --no-install-recommends \
     curl \
@@ -172,6 +190,9 @@ apt-get install -y \
     php8.3-curl php8.3-zip php8.3-intl php8.3-bcmath php8.3-sqlite3 \
     php8.4-fpm php8.4-cli php8.4-common php8.4-mysql php8.4-mbstring php8.4-xml \
     php8.4-curl php8.4-zip php8.4-intl php8.4-bcmath php8.4-sqlite3
+
+# Re-enable service management now that packages are installed
+rm -f /usr/sbin/policy-rc.d
 
 # Install Composer if missing
 if ! command -v composer &> /dev/null; then
