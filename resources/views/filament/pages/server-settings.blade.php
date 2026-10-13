@@ -168,28 +168,48 @@
                 </div>
             </x-slot>
 
-            {{-- Open new port bar --}}
-            <div class="p-3.5 mb-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-900/50 flex flex-wrap items-center gap-3">
-                <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">Allow Port:</span>
-                <input 
-                    type="number" 
-                    placeholder="e.g. 21" 
-                    wire:model="newPort" 
-                    class="w-28 text-xs rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800"
-                />
-                <select 
-                    wire:model="newProto" 
-                    class="text-xs rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800"
-                >
-                    <option value="tcp">TCP</option>
-                    <option value="udp">UDP</option>
-                </select>
-                <button 
-                    wire:click="allowPort"
-                    class="px-3 py-1.5 text-xs font-semibold rounded-lg bg-emerald-600 text-white hover:bg-emerald-500 shadow-sm"
-                >
-                    Allow Rule
-                </button>
+            <x-slot name="description">
+                Active host firewall rules protecting and routing network traffic for your hosted websites, DNS, email, and databases.
+            </x-slot>
+
+            {{-- Open new port bar & Default Rules Restore --}}
+            <div class="p-4 mb-4 rounded-xl border border-gray-200 dark:border-gray-800 bg-gray-50/70 dark:bg-gray-900/60 flex flex-wrap items-center justify-between gap-4">
+                <div class="flex flex-wrap items-center gap-2.5">
+                    <span class="text-xs font-semibold text-gray-700 dark:text-gray-300">Allow Port:</span>
+                    <input 
+                        type="number" 
+                        placeholder="e.g. 21" 
+                        wire:model="newPort" 
+                        class="w-28 text-xs rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-1.5 focus:ring-emerald-500 focus:border-emerald-500"
+                    />
+                    <select 
+                        wire:model="newProto" 
+                        class="text-xs rounded-lg border-gray-300 dark:border-gray-700 dark:bg-gray-800 text-gray-900 dark:text-gray-100 px-3 py-1.5 focus:ring-emerald-500 focus:border-emerald-500"
+                    >
+                        <option value="tcp">TCP</option>
+                        <option value="udp">UDP</option>
+                    </select>
+                    <x-filament::button 
+                        wire:click="allowPort"
+                        size="sm"
+                        color="success"
+                        icon="heroicon-m-plus"
+                    >
+                        Allow Rule
+                    </x-filament::button>
+                </div>
+
+                <div>
+                    <x-filament::button 
+                        wire:click="ensureDefaultRules"
+                        size="sm"
+                        color="primary"
+                        icon="heroicon-m-shield-check"
+                        outlined
+                    >
+                        Ensure All Web Hosting Ports (80, 443, 53, Mail)
+                    </x-filament::button>
+                </div>
             </div>
 
             <div class="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-800">
@@ -198,21 +218,50 @@
                         <tr>
                             <th class="py-2.5 px-4">Port</th>
                             <th class="py-2.5 px-4">Protocol</th>
-                            <th class="py-2.5 px-4">Action</th>
+                            <th class="py-2.5 px-4">Service / Purpose</th>
+                            <th class="py-2.5 px-4">Rule Action</th>
+                            <th class="py-2.5 px-4 text-right">Manage</th>
                         </tr>
                     </thead>
                     <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
-                        @foreach ($firewallRules as $rule)
-                            <tr>
-                                <td class="py-2.5 px-4 font-bold text-gray-900 dark:text-gray-100">{{ $rule['port'] }}</td>
-                                <td class="py-2.5 px-4 text-gray-500 uppercase">{{ $rule['proto'] }}</td>
+                        @forelse ($firewallRules as $rule)
+                            <tr class="hover:bg-gray-50/50 dark:hover:bg-gray-800/30">
+                                <td class="py-2.5 px-4 font-bold text-gray-900 dark:text-gray-100">
+                                    {{ $rule['port'] }}
+                                </td>
+                                <td class="py-2.5 px-4 text-gray-500 uppercase">
+                                    {{ $rule['proto'] }}
+                                </td>
+                                <td class="py-2.5 px-4 font-sans font-medium text-gray-700 dark:text-gray-300">
+                                    {{ $rule['service'] ?? 'Custom Service Port' }}
+                                </td>
                                 <td class="py-2.5 px-4">
-                                    <span class="px-2 py-0.5 rounded-full text-2xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400">
-                                        {{ $rule['action'] }}
+                                    <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-2xs font-semibold bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+                                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                                        {{ $rule['action'] ?? 'ALLOW' }} IN
                                     </span>
                                 </td>
+                                <td class="py-2.5 px-4 text-right">
+                                    @if (! in_array($rule['port'], [22, 8443], true))
+                                        <button 
+                                            wire:click="deleteRule({{ $rule['port'] }}, '{{ $rule['proto'] }}')"
+                                            wire:confirm="Are you sure you want to delete the firewall rule for port {{ $rule['port'] }}?"
+                                            class="text-xs text-rose-500 hover:text-rose-700 font-sans font-medium hover:underline"
+                                        >
+                                            Delete
+                                        </button>
+                                    @else
+                                        <span class="text-3xs text-gray-400 font-sans uppercase">Protected</span>
+                                    @endif
+                                </td>
                             </tr>
-                        @endforeach
+                        @empty
+                            <tr>
+                                <td colspan="5" class="py-6 text-center text-gray-500 font-sans">
+                                    No custom firewall rules configured. Click "Ensure All Web Hosting Ports" above to load standard rules.
+                                </td>
+                            </tr>
+                        @endforelse
                     </tbody>
                 </table>
             </div>

@@ -708,7 +708,7 @@ EOT;
 
     private function handleManageFirewall(array $payload): array
     {
-        $action = $payload['action'] ?? 'status'; // status, allow, deny, delete
+        $action = $payload['action'] ?? 'status'; // status, allow, deny, delete, ensure_defaults
         $port = isset($payload['port']) ? (int) $payload['port'] : null;
         $proto = ($payload['proto'] ?? 'tcp') === 'udp' ? 'udp' : 'tcp';
 
@@ -717,28 +717,109 @@ EOT;
         if ($this->simulate) {
             return [
                 'status' => 'active',
-                'rules' => [
-                    ['port' => 22, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                    ['port' => 80, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                    ['port' => 443, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                    ['port' => 8443, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                    ['port' => 53, 'proto' => 'tcp/udp', 'action' => 'ALLOW'],
-                    ['port' => 25, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                    ['port' => 587, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                    ['port' => 993, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ],
+                'rules' => $this->getDefaultFirewallRules(),
             ];
         }
 
-        if ($action === 'allow' && $port) {
+        if ($action === 'ensure_defaults') {
+            $defaultPorts = [
+                ['port' => 22, 'proto' => 'tcp'],
+                ['port' => 80, 'proto' => 'tcp'],
+                ['port' => 443, 'proto' => 'tcp'],
+                ['port' => 8443, 'proto' => 'tcp'],
+                ['port' => 53, 'proto' => 'tcp'],
+                ['port' => 53, 'proto' => 'udp'],
+                ['port' => 25, 'proto' => 'tcp'],
+                ['port' => 587, 'proto' => 'tcp'],
+                ['port' => 993, 'proto' => 'tcp'],
+            ];
+
+            foreach ($defaultPorts as $dp) {
+                $this->execCommand("ufw", ['allow', "{$dp['port']}/{$dp['proto']}"]);
+            }
+            $this->execCommand("ufw", ['--force', 'enable']);
+        } elseif ($action === 'allow' && $port) {
             $this->execCommand("ufw", ['allow', "{$port}/{$proto}"]);
         } elseif ($action === 'deny' && $port) {
             $this->execCommand("ufw", ['deny', "{$port}/{$proto}"]);
+        } elseif ($action === 'delete' && $port) {
+            $this->execCommand("ufw", ['delete', 'allow', "{$port}/{$proto}"]);
         }
 
-        $res = $this->execCommand("ufw", ['status', 'verbose']);
+        $res = $this->execCommand("ufw", ['status']);
+        $rawLines = explode("\n", $res['output']);
+        $rules = [];
+        $seen = [];
+
+        foreach ($rawLines as $line) {
+            $line = trim($line);
+            if (preg_match('/^(\d+)(?:\/([a-z0-9]+))?(?:\s+\([^\)]+\))?\s+(ALLOW|DENY)/i', $line, $m)) {
+                $p = (int) $m[1];
+                $pr = ! empty($m[2]) ? strtolower($m[2]) : 'tcp/udp';
+                $act = strtoupper($m[3]);
+                $key = "{$p}/{$pr}";
+                if (! isset($seen[$key])) {
+                    $seen[$key] = true;
+                    $rules[] = [
+                        'port' => $p,
+                        'proto' => $pr,
+                        'action' => $act,
+                        'service' => $this->getServiceNameForPort($p, $pr),
+                    ];
+                }
+            }
+        }
+
+        // If no rules were parsed (e.g. UFW was newly enabled or output differed), auto-ensure defaults
+        if (empty($rules)) {
+            $this->execCommand("ufw", ['allow', '22/tcp']);
+            $this->execCommand("ufw", ['allow', '80/tcp']);
+            $this->execCommand("ufw", ['allow', '443/tcp']);
+            $this->execCommand("ufw", ['allow', '8443/tcp']);
+            $this->execCommand("ufw", ['allow', '53']);
+            $this->execCommand("ufw", ['allow', '25/tcp']);
+            $this->execCommand("ufw", ['allow', '587/tcp']);
+            $this->execCommand("ufw", ['allow', '993/tcp']);
+            $this->execCommand("ufw", ['--force', 'enable']);
+
+            $rules = $this->getDefaultFirewallRules();
+        }
+
         return [
+            'status' => 'active',
+            'rules' => $rules,
             'output' => $res['output'],
+        ];
+    }
+
+    private function getServiceNameForPort(int $port, string $proto): string
+    {
+        return match ($port) {
+            22 => 'SSH Remote Management',
+            80 => 'HTTP Web Server (Nginx)',
+            443 => 'HTTPS SSL Web Server',
+            8443 => 'VPS Control Panel',
+            53 => 'PowerDNS Nameserver',
+            25 => 'Postfix SMTP Mail',
+            587 => 'Postfix Mail Submission',
+            993 => 'Dovecot IMAPS (Secure Mailbox)',
+            3306 => 'MariaDB SQL Database',
+            21 => 'FTP File Transfer',
+            default => 'Custom Port Rule',
+        };
+    }
+
+    private function getDefaultFirewallRules(): array
+    {
+        return [
+            ['port' => 22, 'proto' => 'tcp', 'service' => 'SSH Remote Management', 'action' => 'ALLOW'],
+            ['port' => 80, 'proto' => 'tcp', 'service' => 'HTTP Web Server (Nginx)', 'action' => 'ALLOW'],
+            ['port' => 443, 'proto' => 'tcp', 'service' => 'HTTPS SSL Web Server', 'action' => 'ALLOW'],
+            ['port' => 8443, 'proto' => 'tcp', 'service' => 'VPS Control Panel', 'action' => 'ALLOW'],
+            ['port' => 53, 'proto' => 'tcp/udp', 'service' => 'PowerDNS Nameserver', 'action' => 'ALLOW'],
+            ['port' => 25, 'proto' => 'tcp', 'service' => 'Postfix SMTP Mail', 'action' => 'ALLOW'],
+            ['port' => 587, 'proto' => 'tcp', 'service' => 'Postfix Mail Submission', 'action' => 'ALLOW'],
+            ['port' => 993, 'proto' => 'tcp', 'service' => 'Dovecot IMAPS (Secure Mailbox)', 'action' => 'ALLOW'],
         ];
     }
 

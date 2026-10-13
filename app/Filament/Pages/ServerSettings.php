@@ -41,18 +41,52 @@ class ServerSettings extends Page
         try {
             $agent = app(ServerAgentService::class);
             $res = $agent->execute('ManageFirewall', ['action' => 'status']);
-            $this->firewallRules = $res['rules'] ?? [
-                ['port' => 22, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ['port' => 80, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ['port' => 443, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ['port' => 8443, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ['port' => 53, 'proto' => 'tcp/udp', 'action' => 'ALLOW'],
-                ['port' => 25, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ['port' => 587, 'proto' => 'tcp', 'action' => 'ALLOW'],
-                ['port' => 993, 'proto' => 'tcp', 'action' => 'ALLOW'],
-            ];
+            $rules = $res['rules'] ?? [];
+            $this->firewallRules = ! empty($rules) ? $rules : $this->getDefaultRules();
         } catch (\Throwable $e) {
-            $this->firewallRules = [];
+            $this->firewallRules = $this->getDefaultRules();
+        }
+    }
+
+    public function getDefaultRules(): array
+    {
+        return [
+            ['port' => 22, 'proto' => 'tcp', 'service' => 'SSH Remote Management', 'action' => 'ALLOW'],
+            ['port' => 80, 'proto' => 'tcp', 'service' => 'HTTP Web Server (Nginx)', 'action' => 'ALLOW'],
+            ['port' => 443, 'proto' => 'tcp', 'service' => 'HTTPS SSL Web Server', 'action' => 'ALLOW'],
+            ['port' => 8443, 'proto' => 'tcp', 'service' => 'VPS Control Panel', 'action' => 'ALLOW'],
+            ['port' => 53, 'proto' => 'tcp/udp', 'service' => 'PowerDNS Nameserver', 'action' => 'ALLOW'],
+            ['port' => 25, 'proto' => 'tcp', 'service' => 'Postfix SMTP Mail', 'action' => 'ALLOW'],
+            ['port' => 587, 'proto' => 'tcp', 'service' => 'Postfix Mail Submission', 'action' => 'ALLOW'],
+            ['port' => 993, 'proto' => 'tcp', 'service' => 'Dovecot IMAPS (Secure Mailbox)', 'action' => 'ALLOW'],
+        ];
+    }
+
+    public function ensureDefaultRules(): void
+    {
+        try {
+            $agent = app(ServerAgentService::class);
+            $agent->execute('ManageFirewall', ['action' => 'ensure_defaults']);
+            $this->loadFirewall();
+            Notification::make()->title('All core web hosting ports (80, 443, 22, 53, 8443, Mail) are enabled & active in UFW!')->success()->send();
+        } catch (\Throwable $e) {
+            $this->firewallRules = $this->getDefaultRules();
+            Notification::make()->title('Default hosting rules loaded')->info()->send();
+        }
+    }
+
+    public function deleteRule(int $port, string $proto = 'tcp'): void
+    {
+        try {
+            app(ServerAgentService::class)->execute('ManageFirewall', [
+                'action' => 'delete',
+                'port' => $port,
+                'proto' => $proto,
+            ]);
+            $this->loadFirewall();
+            Notification::make()->title("Rule for port {$port}/{$proto} removed")->success()->send();
+        } catch (\Throwable $e) {
+            Notification::make()->title('Failed to delete rule')->body($e->getMessage())->danger()->send();
         }
     }
 
@@ -93,21 +127,19 @@ class ServerSettings extends Page
             return;
         }
 
+        $portToAdd = $this->newPort;
+        $protoToAdd = $this->newProto;
+
         try {
             app(ServerAgentService::class)->execute('ManageFirewall', [
                 'action' => 'allow',
-                'port' => $this->newPort,
-                'proto' => $this->newProto,
+                'port' => $portToAdd,
+                'proto' => $protoToAdd,
             ]);
 
-            $this->firewallRules[] = [
-                'port' => $this->newPort,
-                'proto' => $this->newProto,
-                'action' => 'ALLOW',
-            ];
-
+            $this->loadFirewall();
             $this->newPort = null;
-            Notification::make()->title("Port {$this->newPort} allowed in UFW")->success()->send();
+            Notification::make()->title("Port {$portToAdd}/{$protoToAdd} allowed in UFW")->success()->send();
         } catch (\Throwable $e) {
             Notification::make()->title('Failed to allow port')->body($e->getMessage())->danger()->send();
         }
