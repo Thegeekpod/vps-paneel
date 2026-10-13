@@ -941,6 +941,10 @@ EOT;
     private function handleUpdatePanel(array $payload): array
     {
         $branch = preg_replace('/[^a-zA-Z0-9_\-\.\/]/', '', $payload['branch'] ?? 'main');
+        if ($branch === 'master' || empty($branch)) {
+            $branch = 'main';
+        }
+
         $installDir = '/var/www/vps-panel';
         if (! is_dir($installDir)) {
             $installDir = dirname(__DIR__);
@@ -962,11 +966,23 @@ EOT;
         $this->execCommand('git', ['config', '--system', '--add', 'safe.directory', $installDir]);
         $this->execCommand('git', ['config', '--global', '--add', 'safe.directory', $installDir]);
 
-        // 2. Fetch and Pull
-        $fetchRes = $this->execCommand('git', ['-C', $installDir, 'fetch', 'origin', $branch]);
-        $this->log("git fetch: " . trim($fetchRes['output'] ?: 'ok'));
-
+        // 2. Fetch and Pull (support origin/main)
+        $this->execCommand('git', ['-C', $installDir, 'fetch', 'origin']);
         $pullRes = $this->execCommand('git', ['-C', $installDir, 'pull', 'origin', $branch]);
+        
+        if ($pullRes['exitCode'] !== 0 && $branch !== 'main') {
+            $this->log("Pull failed for {$branch}, switching to main");
+            $pullRes = $this->execCommand('git', ['-C', $installDir, 'pull', 'origin', 'main']);
+            if ($pullRes['exitCode'] === 0) {
+                $branch = 'main';
+            }
+        }
+
+        if ($pullRes['exitCode'] !== 0) {
+            $this->execCommand('git', ['-C', $installDir, 'checkout', '-B', 'main', 'origin/main']);
+            $pullRes = $this->execCommand('git', ['-C', $installDir, 'pull', 'origin', 'main']);
+        }
+
         $this->log("git pull: " . trim($pullRes['output']));
         if ($pullRes['exitCode'] !== 0) {
             throw new \RuntimeException("git pull failed with code {$pullRes['exitCode']}: " . $pullRes['output']);

@@ -23,8 +23,13 @@ class PanelUpdateService
         $message = $this->runCommand(['git', 'log', '-1', '--pretty=%s'], $base);
         $date = $this->runCommand(['git', 'log', '-1', '--pretty=%cd', '--date=relative'], $base);
 
+        $detectedBranch = trim($branch['output']) ?: 'main';
+        if ($detectedBranch === 'master') {
+            $detectedBranch = 'main';
+        }
+
         return [
-            'branch' => trim($branch['output']) ?: 'main',
+            'branch' => $detectedBranch,
             'hash' => trim($hash['output']) ?: 'v1.0.0',
             'full_hash' => trim($fullHash['output']) ?: 'v1.0.0',
             'message' => trim($message['output']) ?: 'Initial release',
@@ -39,7 +44,7 @@ class PanelUpdateService
     {
         $base = base_path();
         $version = $this->getCurrentVersion();
-        $branch = $version['branch'];
+        $branch = $version['branch'] === 'master' ? 'main' : $version['branch'];
 
         // Fetch remote references
         $fetch = $this->runCommand(['git', 'fetch', 'origin', $branch], $base);
@@ -65,7 +70,7 @@ class PanelUpdateService
         $user = Auth::user();
         $ip = request()?->ip() ?? '127.0.0.1';
         $versionBefore = $this->getCurrentVersion();
-        $branch = $versionBefore['branch'];
+        $branch = $versionBefore['branch'] === 'master' ? 'main' : $versionBefore['branch'];
 
         $logs = [];
         $logs[] = "Starting Panel Update process for branch: {$branch}";
@@ -99,6 +104,13 @@ class PanelUpdateService
         // Direct Execution Fallback
         // Step 1: Git Pull with explicit safe.directory flag
         $pull = $this->runCommand(['git', '-c', 'safe.directory=*', 'pull', 'origin', $branch], $base);
+        if ($pull['exitCode'] !== 0 && $branch !== 'main') {
+            $pull = $this->runCommand(['git', '-c', 'safe.directory=*', 'pull', 'origin', 'main'], $base);
+            if ($pull['exitCode'] === 0) {
+                $branch = 'main';
+            }
+        }
+
         if ($pull['exitCode'] !== 0) {
             // Also try simple git pull
             $fallbackPull = $this->runCommand(['git', '-c', 'safe.directory=*', 'pull'], $base);
