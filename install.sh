@@ -122,7 +122,8 @@ done
 if [[ "$UNATTENDED" != "true" ]]; then
     echo ""
     echo "This script will install and configure Nginx, MariaDB, PowerDNS, Postfix, Dovecot, PHP, and UFW."
-    read -rp "Proceed with installation? (y/N): " confirm_install
+    read -rp "Proceed with installation? [Y/n]: " confirm_install
+    confirm_install="${confirm_install:-y}"
     if [[ "${confirm_install,,}" != "y" ]]; then
         echo "Installation aborted by user."
         exit 0
@@ -338,6 +339,9 @@ server {
     add_header X-Content-Type-Options "nosniff" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
 
+    # Redirect plain HTTP requests on this port directly to HTTPS
+    error_page 497 301 =307 https://\$http_host\$request_uri;
+
     location / {
         try_files \$uri \$uri/ /index.php?\$query_string;
     }
@@ -357,7 +361,12 @@ EOF
 
 ln -sf /etc/nginx/sites-available/vps-panel.conf /etc/nginx/sites-enabled/vps-panel.conf
 nginx -t
-systemctl reload nginx
+
+# Ensure PHP-FPM and Nginx are started and enabled
+systemctl restart php${PHP_VERSION}-fpm || systemctl start php${PHP_VERSION}-fpm
+systemctl enable php${PHP_VERSION}-fpm 2>/dev/null || true
+systemctl restart nginx || systemctl start nginx
+systemctl enable nginx 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
 # 8. Systemd Services (Queue Worker & Scheduler)
@@ -431,21 +440,29 @@ ufw --force enable
 # ------------------------------------------------------------------------------
 SERVER_IP=$(curl -s https://api.ipify.org || hostname -I | awk '{print $1}')
 
+# Save credentials to /root/vps-panel-credentials.txt
+CRED_FILE="/root/vps-panel-credentials.txt"
+cat > "$CRED_FILE" << EOF
+======================================================
+  VPS CONTROL PANEL ACCESS CREDENTIALS
+======================================================
+  URL:       https://${SERVER_IP}:${PANEL_PORT}/admin
+  Email:     ${ADMIN_EMAIL}
+  Password:  ${ADMIN_PASSWORD}
+======================================================
+EOF
+chmod 600 "$CRED_FILE" 2>/dev/null || true
+
 echo ""
 echo "======================================================================"
-echo "    INSTALLATION COMPLETE!                                            "
+echo "    >>> INSTALLATION SUCCESSFUL! <<<                                  "
 echo "======================================================================"
 echo ""
-echo "  Panel URL:     https://${SERVER_IP}:${PANEL_PORT}/admin"
-echo "  Admin Email:   ${ADMIN_EMAIL}"
-echo "  Password:      ${ADMIN_PASSWORD}"
+echo "  [+] PANEL URL : https://${SERVER_IP}:${PANEL_PORT}/admin"
+echo "  [+] USERNAME  : ${ADMIN_EMAIL}"
+echo "  [+] PASSWORD  : ${ADMIN_PASSWORD}"
 echo ""
-echo "  Installation Log: ${INSTALL_LOG}"
-echo "  Panel Directory:  ${INSTALL_DIR}"
-echo ""
-echo "  Next Steps:"
-echo "  1. Point your domain's DNS A-record to ${SERVER_IP}"
-echo "  2. Log into the panel to configure Websites, SSL, DNS, and Mailboxes"
-echo "  3. Refer to TROUBLESHOOTING.md and SECURITY.md for advanced settings"
+echo "  Credentials saved to: ${CRED_FILE}"
+echo "  Installation log:     ${INSTALL_LOG}"
 echo "======================================================================"
 echo ""
