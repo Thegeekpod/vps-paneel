@@ -10,7 +10,7 @@ return [
     | of operations. Arbitrary shell commands are strictly forbidden.
     |
     */
-    'agent_path' => env('VPS_AGENT_PATH', base_path('bin/vps-agent')),
+    'agent_path' => env('VPS_AGENT_PATH', file_exists('/usr/local/bin/vps-agent') ? '/usr/local/bin/vps-agent' : base_path('bin/vps-agent')),
     'use_sudo' => env('VPS_AGENT_USE_SUDO', PHP_OS_FAMILY === 'Linux'),
     'simulate' => env('VPS_AGENT_SIMULATE', PHP_OS_FAMILY !== 'Linux'),
 

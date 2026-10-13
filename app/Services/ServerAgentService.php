@@ -41,7 +41,13 @@ class ServerAgentService
         ]);
 
         try {
-            $agentPath = config('vps.agent_path', base_path('bin/vps-agent'));
+            $agentPath = config('vps.agent_path');
+            if (file_exists('/usr/local/bin/vps-agent')) {
+                $agentPath = '/usr/local/bin/vps-agent';
+            } elseif (! $agentPath || ! file_exists($agentPath)) {
+                $agentPath = base_path('bin/vps-agent');
+            }
+
             $useSudo = config('vps.use_sudo', PHP_OS_FAMILY === 'Linux');
             $simulate = config('vps.simulate', PHP_OS_FAMILY !== 'Linux');
 
@@ -61,17 +67,22 @@ class ServerAgentService
             $process->setTimeout(120);
             $process->run();
 
-            $output = $process->getOutput();
+            $output = trim($process->getOutput());
+            $errorOutput = trim($process->getErrorOutput());
             $durationMs = (int) round((microtime(true) - $startTime) * 1000);
 
             $parsed = json_decode($output, true);
 
             if (! $parsed || ! ($parsed['success'] ?? false)) {
-                $errorMessage = $parsed['error'] ?? $output ?: 'Server agent operation failed';
+                $errorMessage = $parsed['error'] 
+                    ?? ($output ?: ($errorOutput ?: 'Server agent operation failed (exit code ' . $process->getExitCode() . ')'));
                 $operation->update([
                     'status' => OperationStatus::Failed,
                     'error_message' => $errorMessage,
-                    'result' => ServerOperation::redactSensitive($parsed['extra'] ?? []),
+                    'result' => ServerOperation::redactSensitive(array_merge($parsed['extra'] ?? [], [
+                        'raw_output' => $output,
+                        'raw_error' => $errorOutput,
+                    ])),
                     'duration_ms' => $durationMs,
                 ]);
 

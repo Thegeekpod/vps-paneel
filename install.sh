@@ -244,11 +244,11 @@ fi
 chmod 750 /usr/local/bin/vps-agent
 chown "root:$PANEL_USER" /usr/local/bin/vps-agent
 
-# Sudoers allowlist: ONLY allow execution of /usr/local/bin/vps-agent
+# Sudoers allowlist: allow execution of /usr/local/bin/vps-agent and install dir agent
 cat > /etc/sudoers.d/vps-panel-agent << EOF
 # Strict allowlist: VPS Panel Agent
-$PANEL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/vps-agent
-www-data ALL=(ALL) NOPASSWD: /usr/local/bin/vps-agent
+$PANEL_USER ALL=(ALL) NOPASSWD: /usr/local/bin/vps-agent, ${INSTALL_DIR}/bin/vps-agent
+www-data ALL=(ALL) NOPASSWD: /usr/local/bin/vps-agent, ${INSTALL_DIR}/bin/vps-agent
 EOF
 chmod 440 /etc/sudoers.d/vps-panel-agent
 visudo -c -f /etc/sudoers.d/vps-panel-agent || {
