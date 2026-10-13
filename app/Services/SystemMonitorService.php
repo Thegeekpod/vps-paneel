@@ -41,10 +41,12 @@ class SystemMonitorService
             $info2 = explode(" ", preg_replace("/\s+/", " ", trim($stat2)));
 
             if (isset($info1[1], $info2[1])) {
-                $total1 = array_sum(array_slice($info1, 1));
-                $total2 = array_sum(array_slice($info2, 1));
-                $idle1 = (float) $info1[4];
-                $idle2 = (float) $info2[4];
+                $slice1 = array_map('floatval', array_slice($info1, 1));
+                $slice2 = array_map('floatval', array_slice($info2, 1));
+                $total1 = array_sum($slice1);
+                $total2 = array_sum($slice2);
+                $idle1 = (float) ($info1[4] ?? 0);
+                $idle2 = (float) ($info2[4] ?? 0);
 
                 $diffTotal = $total2 - $total1;
                 $diffIdle = $idle2 - $idle1;
