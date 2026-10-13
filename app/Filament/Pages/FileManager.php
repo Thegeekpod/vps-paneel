@@ -4,7 +4,6 @@ namespace App\Filament\Pages;
 
 use App\Models\Website;
 use App\Services\FileManagerService;
-use Filament\Forms;
 use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
@@ -23,8 +22,24 @@ class FileManager extends Page implements HasForms
 
     public ?int $selectedWebsiteId = null;
     public string $currentPath = '';
+
+    // File Editor State
     public ?string $editingFilePath = null;
+    public string $editingFileName = '';
     public string $fileContent = '';
+
+    // Creation & Rename Modals State
+    public bool $showNewFileModal = false;
+    public string $newFileName = '';
+
+    public bool $showNewFolderModal = false;
+    public string $newFolderName = '';
+
+    public bool $showRenameModal = false;
+    public string $renameTargetPath = '';
+    public string $renameNewName = '';
+
+    // Upload State
     public $uploadedFile = null;
 
     public function mount(): void
@@ -59,6 +74,7 @@ class FileManager extends Page implements HasForms
     public function navigateTo(string $path): void
     {
         $this->currentPath = trim($path, '/');
+        $this->closeEditor();
     }
 
     public function navigateUp(): void
@@ -70,6 +86,100 @@ class FileManager extends Page implements HasForms
         $parts = explode('/', $this->currentPath);
         array_pop($parts);
         $this->currentPath = implode('/', $parts);
+        $this->closeEditor();
+    }
+
+    public function openNewFileModal(): void
+    {
+        $this->newFileName = '';
+        $this->showNewFileModal = true;
+    }
+
+    public function createNewFile(): void
+    {
+        $site = $this->selectedWebsite;
+        if (! $site) {
+            return;
+        }
+
+        $fileName = trim($this->newFileName);
+        if (empty($fileName)) {
+            Notification::make()->title('File name is required')->danger()->send();
+            return;
+        }
+
+        try {
+            $createdPath = app(FileManagerService::class)->createFile($site, $this->currentPath, $fileName);
+            $this->showNewFileModal = false;
+            $this->newFileName = '';
+
+            Notification::make()->title("File '{$fileName}' created successfully")->success()->send();
+            $this->editFile($createdPath);
+        } catch (\Throwable $e) {
+            Notification::make()->title('Creation failed')->body($e->getMessage())->danger()->send();
+        }
+    }
+
+    public function openNewFolderModal(): void
+    {
+        $this->newFolderName = '';
+        $this->showNewFolderModal = true;
+    }
+
+    public function createNewFolder(): void
+    {
+        $site = $this->selectedWebsite;
+        if (! $site) {
+            return;
+        }
+
+        $folderName = trim($this->newFolderName);
+        if (empty($folderName)) {
+            Notification::make()->title('Folder name is required')->danger()->send();
+            return;
+        }
+
+        try {
+            app(FileManagerService::class)->createFolder($site, $this->currentPath, $folderName);
+            $this->showNewFolderModal = false;
+            $this->newFolderName = '';
+
+            Notification::make()->title("Folder '{$folderName}' created successfully")->success()->send();
+        } catch (\Throwable $e) {
+            Notification::make()->title('Creation failed')->body($e->getMessage())->danger()->send();
+        }
+    }
+
+    public function openRenameModal(string $path, string $currentName): void
+    {
+        $this->renameTargetPath = $path;
+        $this->renameNewName = $currentName;
+        $this->showRenameModal = true;
+    }
+
+    public function executeRename(): void
+    {
+        $site = $this->selectedWebsite;
+        if (! $site || empty($this->renameTargetPath)) {
+            return;
+        }
+
+        $newName = trim($this->renameNewName);
+        if (empty($newName)) {
+            Notification::make()->title('New name cannot be empty')->danger()->send();
+            return;
+        }
+
+        try {
+            app(FileManagerService::class)->renameItem($site, $this->renameTargetPath, $newName);
+            $this->showRenameModal = false;
+            $this->renameTargetPath = '';
+            $this->renameNewName = '';
+
+            Notification::make()->title('Item renamed successfully')->success()->send();
+        } catch (\Throwable $e) {
+            Notification::make()->title('Rename failed')->body($e->getMessage())->danger()->send();
+        }
     }
 
     public function editFile(string $path): void
@@ -81,6 +191,7 @@ class FileManager extends Page implements HasForms
 
         try {
             $this->editingFilePath = $path;
+            $this->editingFileName = basename($path);
             $this->fileContent = app(FileManagerService::class)->getFileContent($site, $path);
         } catch (\Throwable $e) {
             Notification::make()->title('Cannot open file')->body($e->getMessage())->danger()->send();
@@ -96,8 +207,7 @@ class FileManager extends Page implements HasForms
 
         try {
             app(FileManagerService::class)->putFileContent($site, $this->editingFilePath, $this->fileContent);
-            Notification::make()->title('File saved successfully')->success()->send();
-            $this->editingFilePath = null;
+            Notification::make()->title("Saved {$this->editingFileName} successfully")->success()->send();
         } catch (\Throwable $e) {
             Notification::make()->title('Save failed')->body($e->getMessage())->danger()->send();
         }
@@ -106,12 +216,8 @@ class FileManager extends Page implements HasForms
     public function closeEditor(): void
     {
         $this->editingFilePath = null;
+        $this->editingFileName = '';
         $this->fileContent = '';
-    }
-
-    public function createFolderPrompt(): void
-    {
-        // Handled via Livewire action / modal
     }
 
     public function deleteItem(string $path): void
@@ -123,9 +229,49 @@ class FileManager extends Page implements HasForms
 
         try {
             app(FileManagerService::class)->deleteItem($site, $path);
-            Notification::make()->title('Item deleted')->success()->send();
+            if ($this->editingFilePath === $path) {
+                $this->closeEditor();
+            }
+            Notification::make()->title('Item deleted successfully')->success()->send();
         } catch (\Throwable $e) {
             Notification::make()->title('Delete failed')->body($e->getMessage())->danger()->send();
+        }
+    }
+
+    public function updatedUploadedFile(): void
+    {
+        $site = $this->selectedWebsite;
+        if (! $site || ! $this->uploadedFile) {
+            return;
+        }
+
+        try {
+            app(FileManagerService::class)->uploadFile($site, $this->currentPath, $this->uploadedFile);
+            $fileName = $this->uploadedFile->getClientOriginalName();
+            $this->uploadedFile = null;
+            Notification::make()->title("File '{$fileName}' uploaded successfully")->success()->send();
+        } catch (\Throwable $e) {
+            Notification::make()->title('Upload failed')->body($e->getMessage())->danger()->send();
+        }
+    }
+
+    public function downloadItem(string $path)
+    {
+        $site = $this->selectedWebsite;
+        if (! $site) {
+            return;
+        }
+
+        try {
+            $fullPath = app(FileManagerService::class)->resolveSafePath($site, $path);
+            if (! is_file($fullPath)) {
+                Notification::make()->title('File not found for download')->danger()->send();
+                return;
+            }
+
+            return response()->download($fullPath, basename($path));
+        } catch (\Throwable $e) {
+            Notification::make()->title('Download error')->body($e->getMessage())->danger()->send();
         }
     }
 }

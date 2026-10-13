@@ -112,15 +112,66 @@ class FileManagerService
     }
 
     /**
+     * Create new file.
+     */
+    public function createFile(Website $website, string $relativePath, string $fileName, string $initialContent = ''): string
+    {
+        $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '', $fileName);
+        if (empty($cleanName)) {
+            throw new \InvalidArgumentException("Invalid file name");
+        }
+
+        $subPath = ltrim($relativePath . '/' . $cleanName, '/');
+        $target = $this->resolveSafePath($website, $subPath);
+
+        if (file_exists($target)) {
+            throw new \InvalidArgumentException("A file or folder named '{$cleanName}' already exists");
+        }
+
+        file_put_contents($target, $initialContent);
+        return $subPath;
+    }
+
+    /**
      * Create directory.
      */
     public function createFolder(Website $website, string $relativePath, string $folderName): void
     {
         $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '', $folderName);
+        if (empty($cleanName)) {
+            throw new \InvalidArgumentException("Invalid folder name");
+        }
+
         $target = $this->resolveSafePath($website, $relativePath . '/' . $cleanName);
         if (! is_dir($target)) {
             mkdir($target, 0755, true);
         }
+    }
+
+    /**
+     * Rename file or folder.
+     */
+    public function renameItem(Website $website, string $oldRelativePath, string $newName): void
+    {
+        $cleanName = preg_replace('/[^a-zA-Z0-9._-]/', '', $newName);
+        if (empty($cleanName)) {
+            throw new \InvalidArgumentException("Invalid new name");
+        }
+
+        $oldTarget = $this->resolveSafePath($website, $oldRelativePath);
+        if (! file_exists($oldTarget)) {
+            throw new \InvalidArgumentException("Source item not found");
+        }
+
+        $parent = dirname($oldRelativePath);
+        $newRelativePath = ($parent !== '.' && $parent !== '') ? $parent . '/' . $cleanName : $cleanName;
+        $newTarget = $this->resolveSafePath($website, $newRelativePath);
+
+        if (file_exists($newTarget)) {
+            throw new \InvalidArgumentException("An item with name '{$cleanName}' already exists");
+        }
+
+        rename($oldTarget, $newTarget);
     }
 
     /**
