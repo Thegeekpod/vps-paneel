@@ -695,6 +695,17 @@ EOT;
             return ['service' => $service, 'action' => $action, 'status' => 'active'];
         }
 
+        if (in_array($service, ['nginx', 'php8.3-fpm', 'php8.4-fpm'], true) && in_array($action, ['restart', 'reload'], true)) {
+            // Run detached so the current active HTTP connection serving this request is not terminated
+            exec("nohup sh -c 'sleep 1 && systemctl {$action} " . escapeshellarg($service) . "' > /dev/null 2>&1 &");
+            return [
+                'service' => $service,
+                'action' => $action,
+                'exit_code' => 0,
+                'status' => 'active',
+            ];
+        }
+
         $res = $this->execCommand("systemctl", [$action, $service]);
         $statusCheck = $this->execCommand("systemctl", ['is-active', $service]);
 
@@ -1026,10 +1037,9 @@ EOT;
         $this->execCommand('chown', ['-R', 'www-data:www-data', "{$installDir}/bootstrap/cache", "{$installDir}/storage"]);
         $this->execCommand('chmod', ['-R', '777', "{$installDir}/bootstrap/cache", "{$installDir}/storage"]);
 
-        // 9. Restart queue workers and reload PHP-FPM
+        // 9. Restart queue workers and reload PHP-FPM detached so ongoing HTTP request completes cleanly
         $this->execCommand($phpBin, ["{$installDir}/artisan", 'queue:restart']);
-        $this->execCommand('systemctl', ['reload', 'php8.4-fpm']);
-        $this->execCommand('systemctl', ['reload', 'php8.3-fpm']);
+        exec("nohup sh -c 'sleep 1 && systemctl reload php8.4-fpm php8.3-fpm 2>/dev/null || true' > /dev/null 2>&1 &");
 
         return [
             'success' => true,
