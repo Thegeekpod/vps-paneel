@@ -278,9 +278,18 @@ fi
 sed -i 's/DB_CONNECTION=.*/DB_CONNECTION=sqlite/' "$INSTALL_DIR/.env"
 touch "$INSTALL_DIR/database/database.sqlite"
 
-# Set permissions
-chown -R "$PANEL_USER:$PANEL_USER" "$INSTALL_DIR"
-chmod -R 775 "$INSTALL_DIR/storage" "$INSTALL_DIR/bootstrap/cache" "$INSTALL_DIR/database"
+# Ensure all framework storage folders exist
+mkdir -p "$INSTALL_DIR/storage/framework/views"
+mkdir -p "$INSTALL_DIR/storage/framework/cache"
+mkdir -p "$INSTALL_DIR/storage/framework/sessions"
+mkdir -p "$INSTALL_DIR/storage/logs"
+mkdir -p "$INSTALL_DIR/bootstrap/cache"
+
+# Set permissions for web server (www-data) and panel user
+chown -R "$PANEL_USER:www-data" "$INSTALL_DIR"
+chown -R www-data:www-data "$INSTALL_DIR/storage" "$INSTALL_DIR/bootstrap/cache" "$INSTALL_DIR/database"
+chmod -R 777 "$INSTALL_DIR/storage" "$INSTALL_DIR/bootstrap/cache"
+chmod -R 775 "$INSTALL_DIR/database"
 
 # Install composer dependencies as panel user
 sudo -u "$PANEL_USER" composer install --no-dev --optimize-autoloader --no-interaction
