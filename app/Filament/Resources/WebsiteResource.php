@@ -103,6 +103,19 @@ class WebsiteResource extends Resource
                     ]),
             ])
             ->actions([
+                Tables\Actions\Action::make('visit')
+                    ->label('Visit')
+                    ->icon('heroicon-o-arrow-top-right-on-square')
+                    ->color('primary')
+                    ->url(fn(Website $record): string => 'http://' . $record->primary_domain)
+                    ->openUrlInNewTab(),
+
+                Tables\Actions\Action::make('file_manager')
+                    ->label('Files')
+                    ->icon('heroicon-o-folder')
+                    ->color('info')
+                    ->url(fn(Website $record): string => route('filament.admin.pages.file-manager', ['selectedWebsiteId' => $record->id])),
+
                 Tables\Actions\Action::make('issue_ssl')
                     ->label('Issue SSL')
                     ->icon('heroicon-o-shield-check')

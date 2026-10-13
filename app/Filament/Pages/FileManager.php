@@ -9,6 +9,7 @@ use Filament\Forms\Concerns\InteractsWithForms;
 use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Livewire\Attributes\Url;
 use Livewire\WithFileUploads;
 
 class FileManager extends Page implements HasForms
@@ -21,6 +22,7 @@ class FileManager extends Page implements HasForms
     protected static ?int $navigationSort = 3;
     protected static string $view = 'filament.pages.file-manager';
 
+    #[Url]
     public ?int $selectedWebsiteId = null;
     public string $currentPath = '';
 
@@ -45,10 +47,18 @@ class FileManager extends Page implements HasForms
 
     public function mount(): void
     {
-        $firstSite = Website::first();
-        if ($firstSite) {
-            $this->selectedWebsiteId = $firstSite->id;
+        if (! $this->selectedWebsiteId) {
+            $firstSite = Website::first();
+            if ($firstSite) {
+                $this->selectedWebsiteId = $firstSite->id;
+            }
         }
+    }
+
+    public function updatedSelectedWebsiteId(): void
+    {
+        $this->currentPath = '';
+        $this->closeEditor();
     }
 
     public function getSelectedWebsiteProperty(): ?Website
