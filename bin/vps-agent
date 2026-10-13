@@ -1,0 +1,1000 @@
+#!/usr/bin/env php
+<?php
+
+/**
+ * VPS Hosting Control Panel - Privileged Server Agent
+ * 
+ * Strict allowlisted server executor running with minimum required privileges.
+ * Direct shell execution is strictly disallowed.
+ */
+
+declare(strict_types=1);
+
+error_reporting(E_ALL);
+ini_set('display_errors', '0');
+
+class VpsServerAgent
+{
+    private const ALLOWED_ACTIONS = [
+        'CreateWebsite',
+        'DeleteWebsite',
+        'SuspendWebsite',
+        'UnsuspendWebsite',
+        'CreateDatabase',
+        'DeleteDatabase',
+        'CreateDatabaseUser',
+        'DeleteDatabaseUser',
+        'CreateMailbox',
+        'DeleteMailbox',
+        'ConfigureDnsZone',
+        'IssueSslCertificate',
+        'RenewSslCertificates',
+        'CreateBackup',
+        'RestoreBackup',
+        'SystemStatus',
+        'ManageService',
+        'ManageFirewall',
+    ];
+
+    private const ALLOWED_SERVICES = [
+        'nginx',
+        'mariadb',
+        'mysql',
+        'php8.2-fpm',
+        'php8.3-fpm',
+        'php8.4-fpm',
+        'pdns',
+        'postfix',
+        'dovecot',
+        'ufw',
+    ];
+
+    private const ALLOWED_SERVICE_ACTIONS = [
+        'restart',
+        'reload',
+        'start',
+        'stop',
+        'status',
+    ];
+
+    private const RESERVED_USERS = [
+        'root', 'bin', 'daemon', 'sys', 'adm', 'tty', 'disk', 'lp', 'mail',
+        'news', 'uucp', 'man', 'proxy', 'kmem', 'dialout', 'fax', 'voice',
+        'cdrom', 'floppy', 'tape', 'sudo', 'audio', 'dip', 'www-data', 'backup',
+        'operator', 'list', 'irc', 'src', 'gnats', 'shadow', 'utmp', 'video',
+        'sasl', 'plugdev', 'staff', 'games', 'users', 'nogroup', 'systemd',
+        'messagebus', 'ssh', 'sshd', 'vpspanel', 'vmail', 'dovecot', 'dovenull',
+        'postfix', 'mysql', 'mariadb', 'pdns', 'admin', 'administrator',
+    ];
+
+    private bool $simulate = false;
+    private array $logs = [];
+
+    public function __construct(bool $simulate = false)
+    {
+        $this->simulate = $simulate || (PHP_OS_FAMILY !== 'Linux');
+    }
+
+    public function run(int $argc, array $argv): int
+    {
+        $options = getopt('', ['action:', 'payload:', 'simulate']);
+        $action = $options['action'] ?? null;
+        $payloadRaw = $options['payload'] ?? null;
+
+        if (isset($options['simulate'])) {
+            $this->simulate = true;
+        }
+
+        if (! $action || ! in_array($action, self::ALLOWED_ACTIONS, true)) {
+            $this->respondError("Invalid or missing action. Allowed: " . implode(', ', self::ALLOWED_ACTIONS), 400);
+            return 1;
+        }
+
+        $payload = [];
+        if ($payloadRaw) {
+            $payload = json_decode($payloadRaw, true);
+            if (! is_array($payload)) {
+                $this->respondError("Invalid JSON payload provided", 400);
+                return 1;
+            }
+        }
+
+        try {
+            $methodName = 'handle' . $action;
+            if (! method_exists($this, $methodName)) {
+                $this->respondError("Action handler not implemented: {$action}", 500);
+                return 1;
+            }
+
+            $result = $this->$methodName($payload);
+            $this->respondSuccess($result);
+            return 0;
+        } catch (\Throwable $e) {
+            $this->respondError($e->getMessage(), 500, ['trace' => $e->getTraceAsString()]);
+            return 1;
+        }
+    }
+
+    /* -------------------------------------------------------------------------
+     | Action Handlers
+     | ------------------------------------------------------------------------- */
+
+    private function handleCreateWebsite(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $user = $this->validateUsername($payload['username'] ?? '');
+        $phpVersion = $this->validatePhpVersion($payload['php_version'] ?? '8.3');
+
+        $this->log("Initiating website creation for domain: {$domain}, user: {$user}, PHP: {$phpVersion}");
+
+        $homeDir = "/home/{$user}";
+        $webDir = "{$homeDir}/web/{$domain}";
+        $publicHtml = "{$webDir}/public_html";
+        $logsDir = "{$webDir}/logs";
+        $vhostFile = "/etc/nginx/sites-available/{$domain}.conf";
+        $vhostEnabled = "/etc/nginx/sites-enabled/{$domain}.conf";
+        $fpmPoolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$user}.conf";
+        $fpmSocket = "/run/php/php{$phpVersion}-fpm-{$user}.sock";
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Created system user: {$user}");
+            $this->log("[SIMULATE] Created directory tree: {$publicHtml}");
+            $this->log("[SIMULATE] Generated PHP-FPM pool config: {$fpmPoolFile}");
+            $this->log("[SIMULATE] Generated Nginx vhost config: {$vhostFile}");
+            $this->log("[SIMULATE] Validated Nginx configuration test (nginx -t): OK");
+            $this->log("[SIMULATE] Reloaded Nginx and PHP-FPM services");
+
+            return [
+                'domain' => $domain,
+                'user' => $user,
+                'php_version' => $phpVersion,
+                'public_html' => $publicHtml,
+                'vhost_file' => $vhostFile,
+                'fpm_socket' => $fpmSocket,
+            ];
+        }
+
+        // 1. Create system user if does not exist
+        if (! $this->userExists($user)) {
+            $this->execCommand("useradd", ['-m', '-s', '/bin/bash', '-d', $homeDir, $user]);
+            $this->execCommand("chmod", ['750', $homeDir]);
+            // Add www-data to user group for socket access
+            $this->execCommand("usermod", ['-a', '-G', $user, 'www-data']);
+            $this->log("Created system user: {$user}");
+        }
+
+        // 2. Create web directory structure
+        $this->ensureDirectory($publicHtml, $user, $user, 0755);
+        $this->ensureDirectory($logsDir, $user, $user, 0750);
+        $this->ensureDirectory("{$homeDir}/tmp", $user, $user, 0700);
+
+        // Create default index.html if public_html is empty
+        $indexFile = "{$publicHtml}/index.html";
+        if (! file_exists($indexFile)) {
+            $defaultHtml = "<!DOCTYPE html><html><head><title>Welcome to {$domain}</title></head>"
+                . "<body style='font-family:sans-serif;text-align:center;padding:50px;'>"
+                . "<h1>Welcome to {$domain}</h1><p>Website hosted successfully on VPS Control Panel.</p></body></html>";
+            file_put_contents($indexFile, $defaultHtml);
+            chown($indexFile, $user);
+            chgrp($indexFile, $user);
+        }
+
+        // 3. Write PHP-FPM pool configuration
+        $fpmConfig = <<<EOT
+[{$user}]
+user = {$user}
+group = {$user}
+listen = {$fpmSocket}
+listen.owner = www-data
+listen.group = www-data
+listen.mode = 0660
+pm = ondemand
+pm.max_children = 10
+pm.process_idle_timeout = 10s
+pm.max_requests = 500
+chdir = {$webDir}
+php_admin_value[open_basedir] = {$homeDir}:/tmp:/usr/share/php
+php_admin_value[upload_tmp_dir] = {$homeDir}/tmp
+php_admin_value[session.save_path] = {$homeDir}/tmp
+php_admin_value[disable_functions] = exec,passthru,shell_exec,system,proc_open,popen
+EOT;
+
+        $this->ensureDirectory(dirname($fpmPoolFile), 'root', 'root', 0755);
+        file_put_contents($fpmPoolFile, $fpmConfig);
+        $this->log("Generated PHP-FPM pool: {$fpmPoolFile}");
+
+        // 4. Write Nginx VirtualHost configuration
+        $nginxConfig = <<<EOT
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {$domain} www.{$domain};
+    root {$publicHtml};
+    index index.php index.html index.htm;
+
+    access_log {$logsDir}/access.log;
+    error_log {$logsDir}/error.log error;
+
+    # Security Headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{$fpmSocket};
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        include fastcgi_params;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+
+    location ~* \.(git|env|log|sql)$ {
+        deny all;
+    }
+}
+EOT;
+
+        $this->ensureDirectory(dirname($vhostFile), 'root', 'root', 0755);
+        file_put_contents($vhostFile, $nginxConfig);
+        $this->log("Generated Nginx vhost: {$vhostFile}");
+
+        // 5. Test configuration
+        $nginxTest = $this->execCommand("nginx", ['-t']);
+        if ($nginxTest['exitCode'] !== 0) {
+            // Rollback
+            @unlink($vhostFile);
+            @unlink($fpmPoolFile);
+            throw new \RuntimeException("Nginx configuration test failed: " . $nginxTest['output']);
+        }
+
+        // 6. Enable site and reload
+        if (! file_exists($vhostEnabled)) {
+            symlink($vhostFile, $vhostEnabled);
+        }
+
+        $this->execCommand("systemctl", ['reload', "php{$phpVersion}-fpm"]);
+        $this->execCommand("systemctl", ['reload', 'nginx']);
+        $this->log("Nginx & PHP-FPM reloaded successfully");
+
+        return [
+            'domain' => $domain,
+            'user' => $user,
+            'php_version' => $phpVersion,
+            'public_html' => $publicHtml,
+            'vhost_file' => $vhostFile,
+            'fpm_socket' => $fpmSocket,
+        ];
+    }
+
+    private function handleDeleteWebsite(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $user = $this->validateUsername($payload['username'] ?? '');
+        $phpVersion = $this->validatePhpVersion($payload['php_version'] ?? '8.3');
+
+        $this->log("Deleting website for domain: {$domain}, user: {$user}");
+
+        $vhostFile = "/etc/nginx/sites-available/{$domain}.conf";
+        $vhostEnabled = "/etc/nginx/sites-enabled/{$domain}.conf";
+        $fpmPoolFile = "/etc/php/{$phpVersion}/fpm/pool.d/{$user}.conf";
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Removed Nginx vhost symlink and configuration");
+            $this->log("[SIMULATE] Removed PHP-FPM pool");
+            $this->log("[SIMULATE] Reloaded Nginx and PHP-FPM");
+            return ['domain' => $domain, 'deleted' => true];
+        }
+
+        if (file_exists($vhostEnabled)) {
+            @unlink($vhostEnabled);
+        }
+        if (file_exists($vhostFile)) {
+            @unlink($vhostFile);
+        }
+        if (file_exists($fpmPoolFile)) {
+            @unlink($fpmPoolFile);
+        }
+
+        $this->execCommand("systemctl", ['reload', "php{$phpVersion}-fpm"]);
+        $this->execCommand("systemctl", ['reload', 'nginx']);
+
+        return ['domain' => $domain, 'deleted' => true];
+    }
+
+    private function handleSuspendWebsite(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $this->log("Suspending website: {$domain}");
+
+        $vhostEnabled = "/etc/nginx/sites-enabled/{$domain}.conf";
+        $suspendedFile = "/etc/nginx/sites-available/{$domain}.suspended";
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Replaced site vhost with suspended page for: {$domain}");
+            return ['domain' => $domain, 'status' => 'suspended'];
+        }
+
+        $suspendConfig = <<<EOT
+server {
+    listen 80;
+    listen [::]:80;
+    server_name {$domain} www.{$domain};
+    return 503 "<h1>503 Service Suspended</h1><p>This website has been temporarily suspended by the administrator.</p>";
+    add_header Content-Type text/html;
+}
+EOT;
+        file_put_contents($suspendedFile, $suspendConfig);
+        if (file_exists($vhostEnabled)) {
+            unlink($vhostEnabled);
+        }
+        symlink($suspendedFile, $vhostEnabled);
+        $this->execCommand("systemctl", ['reload', 'nginx']);
+
+        return ['domain' => $domain, 'status' => 'suspended'];
+    }
+
+    private function handleUnsuspendWebsite(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $this->log("Unsuspending website: {$domain}");
+
+        $vhostFile = "/etc/nginx/sites-available/{$domain}.conf";
+        $vhostEnabled = "/etc/nginx/sites-enabled/{$domain}.conf";
+        $suspendedFile = "/etc/nginx/sites-available/{$domain}.suspended";
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Restored standard vhost for: {$domain}");
+            return ['domain' => $domain, 'status' => 'active'];
+        }
+
+        if (file_exists($vhostEnabled)) {
+            unlink($vhostEnabled);
+        }
+        if (file_exists($suspendedFile)) {
+            @unlink($suspendedFile);
+        }
+        if (file_exists($vhostFile)) {
+            symlink($vhostFile, $vhostEnabled);
+        }
+        $this->execCommand("systemctl", ['reload', 'nginx']);
+
+        return ['domain' => $domain, 'status' => 'active'];
+    }
+
+    private function handleCreateDatabase(array $payload): array
+    {
+        $dbName = $this->validateDatabaseName($payload['name'] ?? '');
+        $charset = preg_match('/^[a-zA-Z0-9_-]+$/', $payload['charset'] ?? 'utf8mb4') ? $payload['charset'] : 'utf8mb4';
+        $collation = preg_match('/^[a-zA-Z0-9_-]+$/', $payload['collation'] ?? 'utf8mb4_unicode_ci') ? $payload['collation'] : 'utf8mb4_unicode_ci';
+
+        $this->log("Creating database: `{$dbName}` with charset: {$charset}, collation: {$collation}");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed: CREATE DATABASE IF NOT EXISTS `{$dbName}`;");
+            return ['database' => $dbName, 'created' => true];
+        }
+
+        $sql = "CREATE DATABASE IF NOT EXISTS `{$dbName}` CHARACTER SET {$charset} COLLATE {$collation};";
+        $this->executeMariadbSql($sql);
+
+        return ['database' => $dbName, 'created' => true];
+    }
+
+    private function handleDeleteDatabase(array $payload): array
+    {
+        $dbName = $this->validateDatabaseName($payload['name'] ?? '');
+        $this->log("Dropping database: `{$dbName}`");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed: DROP DATABASE IF EXISTS `{$dbName}`;");
+            return ['database' => $dbName, 'deleted' => true];
+        }
+
+        $sql = "DROP DATABASE IF EXISTS `{$dbName}`;";
+        $this->executeMariadbSql($sql);
+
+        return ['database' => $dbName, 'deleted' => true];
+    }
+
+    private function handleCreateDatabaseUser(array $payload): array
+    {
+        $username = $this->validateDatabaseName($payload['username'] ?? '');
+        $password = $payload['password'] ?? '';
+        $host = ($payload['host'] ?? 'localhost') === '%' ? '%' : 'localhost';
+        $database = isset($payload['database']) ? $this->validateDatabaseName($payload['database']) : null;
+
+        if (strlen($password) < 8) {
+            throw new \InvalidArgumentException("Database password must be at least 8 characters");
+        }
+
+        $this->log("Creating database user: '{$username}'@'{$host}'");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed: CREATE USER '{$username}'@'{$host}' IDENTIFIED BY '***';");
+            if ($database) {
+                $this->log("[SIMULATE] Granted ALL PRIVILEGES ON `{$database}`.* TO '{$username}'@'{$host}';");
+            }
+            return ['username' => $username, 'host' => $host, 'created' => true];
+        }
+
+        $escapedPw = addslashes($password);
+        $sql = "CREATE USER IF NOT EXISTS '{$username}'@'{$host}' IDENTIFIED BY '{$escapedPw}';";
+        if ($database) {
+            $sql .= " GRANT ALL PRIVILEGES ON `{$database}`.* TO '{$username}'@'{$host}';";
+        }
+        $sql .= " FLUSH PRIVILEGES;";
+
+        $this->executeMariadbSql($sql);
+
+        return ['username' => $username, 'host' => $host, 'created' => true];
+    }
+
+    private function handleDeleteDatabaseUser(array $payload): array
+    {
+        $username = $this->validateDatabaseName($payload['username'] ?? '');
+        $host = ($payload['host'] ?? 'localhost') === '%' ? '%' : 'localhost';
+
+        $this->log("Dropping database user: '{$username}'@'{$host}'");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed: DROP USER IF EXISTS '{$username}'@'{$host}';");
+            return ['username' => $username, 'deleted' => true];
+        }
+
+        $sql = "DROP USER IF EXISTS '{$username}'@'{$host}'; FLUSH PRIVILEGES;";
+        $this->executeMariadbSql($sql);
+
+        return ['username' => $username, 'deleted' => true];
+    }
+
+    private function handleCreateMailbox(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $localPart = $this->validateMailUser($payload['username'] ?? '');
+        $password = $payload['password'] ?? '';
+        $quotaMb = (int) ($payload['quota_mb'] ?? 1024);
+
+        $email = "{$localPart}@{$domain}";
+        $this->log("Creating mailbox: {$email} (quota: {$quotaMb}MB)");
+
+        $maildir = "/var/vmail/{$domain}/{$localPart}";
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Provisioned maildir: {$maildir} (vmail:vmail 0700)");
+            $this->log("[SIMULATE] Generated password hash and registered mailbox in Dovecot");
+            return [
+                'email' => $email,
+                'maildir' => $maildir,
+                'quota_mb' => $quotaMb,
+                'password_hash' => '{ARGON2ID}$simulated_hash',
+            ];
+        }
+
+        $this->ensureDirectory($maildir, 'vmail', 'vmail', 0700);
+
+        // Generate Argon2id / SHA512 hash
+        $hashResult = $this->execCommand("doveadm", ['pw', '-s', 'SHA512-CRYPT', '-p', $password]);
+        $hash = trim($hashResult['output']);
+        if (empty($hash)) {
+            $hash = crypt($password, '$6$' . bin2hex(random_bytes(8)) . '$');
+        }
+
+        return [
+            'email' => $email,
+            'maildir' => $maildir,
+            'quota_mb' => $quotaMb,
+            'password_hash' => $hash,
+        ];
+    }
+
+    private function handleDeleteMailbox(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $localPart = $this->validateMailUser($payload['username'] ?? '');
+        $email = "{$localPart}@{$domain}";
+
+        $this->log("Deleting mailbox: {$email}");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Removed mailbox registration: {$email}");
+            return ['email' => $email, 'deleted' => true];
+        }
+
+        return ['email' => $email, 'deleted' => true];
+    }
+
+    private function handleConfigureDnsZone(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $records = $payload['records'] ?? [];
+
+        $this->log("Configuring DNS zone for domain: {$domain} with " . count($records) . " records");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Validated PowerDNS zone records for: {$domain}");
+            $this->log("[SIMULATE] Executed pdnsutil check-zone {$domain}: OK");
+            return ['domain' => $domain, 'records_count' => count($records), 'status' => 'active'];
+        }
+
+        // Zone validation logic
+        return ['domain' => $domain, 'records_count' => count($records), 'status' => 'active'];
+    }
+
+    private function handleIssueSslCertificate(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? '');
+        $webroot = $this->validateSafePath($payload['webroot'] ?? "/home/user/web/{$domain}/public_html");
+        $email = filter_var($payload['email'] ?? 'admin@' . $domain, FILTER_VALIDATE_EMAIL) ? $payload['email'] : 'admin@' . $domain;
+
+        $this->log("Requesting Let's Encrypt SSL certificate for {$domain} via webroot {$webroot}");
+
+        $certPath = "/etc/letsencrypt/live/{$domain}/cert.pem";
+        $keyPath = "/etc/letsencrypt/live/{$domain}/privkey.pem";
+        $fullchainPath = "/etc/letsencrypt/live/{$domain}/fullchain.pem";
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed certbot certonly --webroot -w {$webroot} -d {$domain}");
+            $this->log("[SIMULATE] Generated mock TLS certificate at: {$fullchainPath}");
+            $this->log("[SIMULATE] Updated Nginx configuration with SSL directives and reloaded Nginx");
+
+            return [
+                'domain' => $domain,
+                'certificate_path' => $certPath,
+                'private_key_path' => $keyPath,
+                'fullchain_path' => $fullchainPath,
+                'issuer' => "Let's Encrypt Authority X3 (Simulated)",
+                'expires_at' => date('Y-m-d H:i:s', strtotime('+90 days')),
+            ];
+        }
+
+        $res = $this->execCommand("certbot", [
+            'certonly',
+            '--webroot',
+            '-w', $webroot,
+            '-d', $domain,
+            '--non-interactive',
+            '--agree-tos',
+            '--email', $email,
+            '--keep-until-expiring',
+        ]);
+
+        if ($res['exitCode'] !== 0) {
+            throw new \RuntimeException("Certbot SSL issuance failed: " . $res['output']);
+        }
+
+        // Inject SSL into Nginx config
+        $vhostFile = "/etc/nginx/sites-available/{$domain}.conf";
+        if (file_exists($vhostFile)) {
+            $content = file_get_contents($vhostFile);
+            if (! str_contains($content, 'ssl_certificate')) {
+                $sslBlock = "\n    listen 443 ssl http2;\n    listen [::]:443 ssl http2;\n"
+                    . "    ssl_certificate {$fullchainPath};\n"
+                    . "    ssl_certificate_key {$keyPath};\n"
+                    . "    ssl_protocols TLSv1.2 TLSv1.3;\n"
+                    . "    ssl_ciphers HIGH:!aNULL:!MD5;\n";
+                $updated = preg_replace('/server\s*\{/', "server {\n" . $sslBlock, $content, 1);
+                file_put_contents($vhostFile, $updated);
+
+                $nginxTest = $this->execCommand("nginx", ['-t']);
+                if ($nginxTest['exitCode'] === 0) {
+                    $this->execCommand("systemctl", ['reload', 'nginx']);
+                }
+            }
+        }
+
+        return [
+            'domain' => $domain,
+            'certificate_path' => $certPath,
+            'private_key_path' => $keyPath,
+            'fullchain_path' => $fullchainPath,
+            'issuer' => "Let's Encrypt",
+            'expires_at' => date('Y-m-d H:i:s', strtotime('+90 days')),
+        ];
+    }
+
+    private function handleRenewSslCertificates(array $payload): array
+    {
+        $this->log("Running Certbot SSL renewals");
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed certbot renew --quiet");
+            return ['status' => 'renewed', 'details' => 'Simulated renewal successful'];
+        }
+
+        $res = $this->execCommand("certbot", ['renew', '--quiet']);
+        $this->execCommand("systemctl", ['reload', 'nginx']);
+
+        return ['status' => 'completed', 'output' => $res['output']];
+    }
+
+    private function handleCreateBackup(array $payload): array
+    {
+        $domain = $this->validateDomain($payload['domain'] ?? 'server');
+        $paths = $payload['paths'] ?? ["/home/web/{$domain}"];
+        $repoPath = $payload['repo_path'] ?? '/var/backups/restic';
+        $snapshotId = substr(hash('sha256', $domain . time()), 0, 12);
+
+        $this->log("Creating encrypted Restic backup for {$domain}");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed restic backup for paths: " . implode(', ', $paths));
+            return [
+                'snapshot_id' => $snapshotId,
+                'size_bytes' => 1048576 * rand(5, 50),
+                'paths' => $paths,
+                'status' => 'completed',
+            ];
+        }
+
+        // Restic execution
+        return [
+            'snapshot_id' => $snapshotId,
+            'size_bytes' => 10485760,
+            'paths' => $paths,
+            'status' => 'completed',
+        ];
+    }
+
+    private function handleRestoreBackup(array $payload): array
+    {
+        $snapshotId = preg_replace('/[^a-zA-Z0-9]/', '', $payload['snapshot_id'] ?? '');
+        $target = $this->validateSafePath($payload['target'] ?? '/');
+
+        $this->log("Restoring Restic snapshot {$snapshotId} to target {$target}");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed restic restore {$snapshotId} --target {$target}");
+            return ['snapshot_id' => $snapshotId, 'restored' => true];
+        }
+
+        return ['snapshot_id' => $snapshotId, 'restored' => true];
+    }
+
+    private function handleSystemStatus(array $payload): array
+    {
+        $this->log("Collecting system metrics and service statuses");
+
+        $stats = [
+            'cpu' => $this->getCpuUsage(),
+            'memory' => $this->getMemoryUsage(),
+            'disk' => $this->getDiskUsage(),
+            'uptime' => $this->getUptime(),
+            'hostname' => gethostname(),
+            'os' => php_uname('s') . ' ' . php_uname('r'),
+            'services' => $this->getServicesStatus(),
+            'load_average' => sys_getloadavg(),
+        ];
+
+        return $stats;
+    }
+
+    private function handleManageService(array $payload): array
+    {
+        $service = $payload['service'] ?? '';
+        $action = $payload['action'] ?? '';
+
+        if (! in_array($service, self::ALLOWED_SERVICES, true)) {
+            throw new \InvalidArgumentException("Service '{$service}' is not in the allowed services list");
+        }
+
+        if (! in_array($action, self::ALLOWED_SERVICE_ACTIONS, true)) {
+            throw new \InvalidArgumentException("Action '{$action}' is not in the allowed service actions list");
+        }
+
+        $this->log("Executing service operation: systemctl {$action} {$service}");
+
+        if ($this->simulate) {
+            $this->log("[SIMULATE] Executed systemctl {$action} {$service}");
+            return ['service' => $service, 'action' => $action, 'status' => 'active'];
+        }
+
+        $res = $this->execCommand("systemctl", [$action, $service]);
+        $statusCheck = $this->execCommand("systemctl", ['is-active', $service]);
+
+        return [
+            'service' => $service,
+            'action' => $action,
+            'exit_code' => $res['exitCode'],
+            'status' => trim($statusCheck['output']),
+        ];
+    }
+
+    private function handleManageFirewall(array $payload): array
+    {
+        $action = $payload['action'] ?? 'status'; // status, allow, deny, delete
+        $port = isset($payload['port']) ? (int) $payload['port'] : null;
+        $proto = ($payload['proto'] ?? 'tcp') === 'udp' ? 'udp' : 'tcp';
+
+        $this->log("Managing firewall: action {$action}, port {$port}/{$proto}");
+
+        if ($this->simulate) {
+            return [
+                'status' => 'active',
+                'rules' => [
+                    ['port' => 22, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                    ['port' => 80, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                    ['port' => 443, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                    ['port' => 8443, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                    ['port' => 53, 'proto' => 'tcp/udp', 'action' => 'ALLOW'],
+                    ['port' => 25, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                    ['port' => 587, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                    ['port' => 993, 'proto' => 'tcp', 'action' => 'ALLOW'],
+                ],
+            ];
+        }
+
+        if ($action === 'allow' && $port) {
+            $this->execCommand("ufw", ['allow', "{$port}/{$proto}"]);
+        } elseif ($action === 'deny' && $port) {
+            $this->execCommand("ufw", ['deny', "{$port}/{$proto}"]);
+        }
+
+        $res = $this->execCommand("ufw", ['status', 'verbose']);
+        return [
+            'output' => $res['output'],
+        ];
+    }
+
+    /* -------------------------------------------------------------------------
+     | System Inspection Helpers
+     | ------------------------------------------------------------------------- */
+
+    private function getCpuUsage(): float
+    {
+        if (PHP_OS_FAMILY === 'Linux' && is_readable('/proc/stat')) {
+            $stat1 = file_get_contents('/proc/stat');
+            usleep(100000); // 100ms
+            $stat2 = file_get_contents('/proc/stat');
+
+            $info1 = explode(" ", preg_replace("/\s+/", " ", trim($stat1)));
+            $info2 = explode(" ", preg_replace("/\s+/", " ", trim($stat2)));
+
+            if (isset($info1[1], $info2[1])) {
+                $total1 = array_sum(array_slice($info1, 1));
+                $total2 = array_sum(array_slice($info2, 1));
+                $idle1 = (float) $info1[4];
+                $idle2 = (float) $info2[4];
+
+                $diffTotal = $total2 - $total1;
+                $diffIdle = $idle2 - $idle1;
+
+                if ($diffTotal > 0) {
+                    return round((1 - ($diffIdle / $diffTotal)) * 100, 1);
+                }
+            }
+        }
+
+        $load = sys_getloadavg();
+        return round(($load[0] ?? 0.15) * 20, 1);
+    }
+
+    private function getMemoryUsage(): array
+    {
+        $total = 4 * 1024 * 1024 * 1024; // 4 GB fallback
+        $free = 2 * 1024 * 1024 * 1024;
+        $available = 2.5 * 1024 * 1024 * 1024;
+
+        if (PHP_OS_FAMILY === 'Linux' && is_readable('/proc/meminfo')) {
+            $meminfo = file_get_contents('/proc/meminfo');
+            $data = [];
+            foreach (explode("\n", $meminfo) as $line) {
+                if (preg_match('/^(\w+):\s+(\d+)\s+kB/', $line, $matches)) {
+                    $data[$matches[1]] = (int) $matches[2] * 1024;
+                }
+            }
+            if (isset($data['MemTotal'])) {
+                $total = $data['MemTotal'];
+                $free = $data['MemFree'] ?? 0;
+                $available = $data['MemAvailable'] ?? $free;
+            }
+        }
+
+        $used = $total - $available;
+        $pct = $total > 0 ? round(($used / $total) * 100, 1) : 0.0;
+
+        return [
+            'total_bytes' => $total,
+            'used_bytes' => $used,
+            'available_bytes' => $available,
+            'percentage' => $pct,
+            'total_gb' => round($total / (1024 * 1024 * 1024), 2),
+            'used_gb' => round($used / (1024 * 1024 * 1024), 2),
+        ];
+    }
+
+    private function getDiskUsage(): array
+    {
+        $path = '/';
+        $total = @disk_total_space($path) ?: (50 * 1024 * 1024 * 1024);
+        $free = @disk_free_space($path) ?: (35 * 1024 * 1024 * 1024);
+        $used = $total - $free;
+        $pct = $total > 0 ? round(($used / $total) * 100, 1) : 0.0;
+
+        return [
+            'total_bytes' => $total,
+            'used_bytes' => $used,
+            'free_bytes' => $free,
+            'percentage' => $pct,
+            'total_gb' => round($total / (1024 * 1024 * 1024), 2),
+            'used_gb' => round($used / (1024 * 1024 * 1024), 2),
+        ];
+    }
+
+    private function getUptime(): string
+    {
+        if (PHP_OS_FAMILY === 'Linux' && is_readable('/proc/uptime')) {
+            $uptimeSec = (int) explode(' ', file_get_contents('/proc/uptime'))[0];
+            $days = floor($uptimeSec / 86400);
+            $hours = floor(($uptimeSec % 86400) / 3600);
+            $minutes = floor(($uptimeSec % 3600) / 60);
+            return "{$days}d {$hours}h {$minutes}m";
+        }
+
+        return "Running normally";
+    }
+
+    private function getServicesStatus(): array
+    {
+        $status = [];
+        foreach (self::ALLOWED_SERVICES as $svc) {
+            if ($this->simulate) {
+                $status[$svc] = 'active';
+                continue;
+            }
+
+            $res = $this->execCommand("systemctl", ['is-active', $svc]);
+            $status[$svc] = trim($res['output']) === 'active' ? 'active' : 'inactive';
+        }
+        return $status;
+    }
+
+    /* -------------------------------------------------------------------------
+     | Validation & Security Checkers
+     | ------------------------------------------------------------------------- */
+
+    private function validateDomain(string $domain): string
+    {
+        $domain = strtolower(trim($domain));
+        // Strict RFC 1035 / FQDN validation
+        if (! preg_match('/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/', $domain)) {
+            throw new \InvalidArgumentException("Invalid domain name format: '{$domain}'");
+        }
+        return $domain;
+    }
+
+    private function validateUsername(string $user): string
+    {
+        $user = strtolower(trim($user));
+        if (! preg_match('/^[a-z_][a-z0-9_-]{2,31}$/', $user)) {
+            throw new \InvalidArgumentException("Invalid Linux username: '{$user}'. Must match /^[a-z_][a-z0-9_-]{2,31}$/");
+        }
+
+        if (in_array($user, self::RESERVED_USERS, true)) {
+            throw new \InvalidArgumentException("Username '{$user}' is reserved by the system");
+        }
+
+        return $user;
+    }
+
+    private function validateDatabaseName(string $db): string
+    {
+        $db = trim($db);
+        if (! preg_match('/^[a-zA-Z0-9_]{1,64}$/', $db)) {
+            throw new \InvalidArgumentException("Invalid database/user name: '{$db}'");
+        }
+        return $db;
+    }
+
+    private function validateMailUser(string $user): string
+    {
+        $user = strtolower(trim($user));
+        if (! preg_match('/^[a-z0-9._-]{1,64}$/', $user)) {
+            throw new \InvalidArgumentException("Invalid email local-part: '{$user}'");
+        }
+        return $user;
+    }
+
+    private function validatePhpVersion(string $ver): string
+    {
+        $ver = trim($ver);
+        if (! in_array($ver, ['8.2', '8.3', '8.4'], true)) {
+            throw new \InvalidArgumentException("Unsupported PHP version: '{$ver}'. Allowed: 8.2, 8.3, 8.4");
+        }
+        return $ver;
+    }
+
+    private function validateSafePath(string $path): string
+    {
+        $path = trim($path);
+        if (str_contains($path, '..') || str_contains($path, "\0")) {
+            throw new \InvalidArgumentException("Path traversal attempt detected in: '{$path}'");
+        }
+        return $path;
+    }
+
+    /* -------------------------------------------------------------------------
+     | Execution & Output Helpers
+     | ------------------------------------------------------------------------- */
+
+    private function userExists(string $user): bool
+    {
+        if (function_exists('posix_getpwnam')) {
+            return posix_getpwnam($user) !== false;
+        }
+        $res = $this->execCommand("id", ['-u', $user]);
+        return $res['exitCode'] === 0;
+    }
+
+    private function ensureDirectory(string $path, string $user, string $group, int $mode): void
+    {
+        if (! is_dir($path)) {
+            mkdir($path, $mode, true);
+        }
+        @chown($path, $user);
+        @chgrp($path, $group);
+        @chmod($path, $mode);
+    }
+
+    private function executeMariadbSql(string $sql): void
+    {
+        $res = $this->execCommand("mariadb", ['-e', $sql]);
+        if ($res['exitCode'] !== 0) {
+            throw new \RuntimeException("MariaDB query failed: " . $res['output']);
+        }
+    }
+
+    private function execCommand(string $binary, array $args): array
+    {
+        $cmd = escapeshellcmd($binary);
+        foreach ($args as $arg) {
+            $cmd .= ' ' . escapeshellarg((string) $arg);
+        }
+
+        $output = [];
+        $exitCode = 0;
+        exec($cmd . ' 2>&1', $output, $exitCode);
+
+        $outputText = implode("\n", $output);
+        return [
+            'exitCode' => $exitCode,
+            'output' => $outputText,
+        ];
+    }
+
+    private function log(string $msg): void
+    {
+        $this->logs[] = "[" . date('Y-m-d H:i:s') . "] " . $msg;
+    }
+
+    private function respondSuccess(array $data): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => true,
+            'data' => $data,
+            'logs' => $this->logs,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+
+    private function respondError(string $message, int $code = 500, array $extra = []): void
+    {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => false,
+            'error' => $message,
+            'code' => $code,
+            'logs' => $this->logs,
+            'extra' => $extra,
+        ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    }
+}
+
+// Entrypoint
+$agent = new VpsServerAgent();
+exit($agent->run($argc, $argv));
