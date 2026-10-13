@@ -376,6 +376,7 @@ server {
 }
 EOF
 
+rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/vps-panel.conf /etc/nginx/sites-enabled/vps-panel.conf
 nginx -t
 

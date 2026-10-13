@@ -250,18 +250,25 @@ EOT;
         file_put_contents($vhostFile, $nginxConfig);
         $this->log("Generated Nginx vhost: {$vhostFile}");
 
-        // 5. Test configuration
+        // 5. Remove default Ubuntu Nginx site so it never conflicts with user sites
+        if (file_exists('/etc/nginx/sites-enabled/default')) {
+            @unlink('/etc/nginx/sites-enabled/default');
+            $this->log("Removed conflicting default Nginx site");
+        }
+
+        // 6. Enable site
+        if (! file_exists($vhostEnabled)) {
+            symlink($vhostFile, $vhostEnabled);
+        }
+
+        // 7. Test configuration with newly enabled site
         $nginxTest = $this->execCommand("nginx", ['-t']);
         if ($nginxTest['exitCode'] !== 0) {
             // Rollback
+            @unlink($vhostEnabled);
             @unlink($vhostFile);
             @unlink($fpmPoolFile);
             throw new \RuntimeException("Nginx configuration test failed: " . $nginxTest['output']);
-        }
-
-        // 6. Enable site and reload
-        if (! file_exists($vhostEnabled)) {
-            symlink($vhostFile, $vhostEnabled);
         }
 
         $this->execCommand("systemctl", ['reload', "php{$phpVersion}-fpm"]);
@@ -778,9 +785,21 @@ EOT;
             }
         } elseif ($action === 'fix_permissions') {
             if ($user && is_dir("/home/{$user}/web")) {
+                $this->execCommand('chmod', ['755', "/home/{$user}"]);
                 $this->execCommand('chown', ['-R', "{$user}:www-data", "/home/{$user}/web"]);
                 $this->execCommand('chmod', ['-R', '775', "/home/{$user}/web"]);
                 $this->execCommand('find', ["/home/{$user}/web", '-type', 'f', '-exec', 'chmod', '664', '{}', '+']);
+            }
+        } elseif ($action === 'fix_permissions_all') {
+            $homes = glob('/home/*', GLOB_ONLYDIR) ?: [];
+            foreach ($homes as $home) {
+                $u = basename($home);
+                if (is_dir("{$home}/web")) {
+                    $this->execCommand('chmod', ['755', $home]);
+                    $this->execCommand('chown', ['-R', "{$u}:www-data", "{$home}/web"]);
+                    $this->execCommand('chmod', ['-R', '775', "{$home}/web"]);
+                    $this->execCommand('find', ["{$home}/web", '-type', 'f', '-exec', 'chmod', '664', '{}', '+']);
+                }
             }
         }
 
