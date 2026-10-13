@@ -56,6 +56,16 @@
                     </span>
                 </label>
 
+                <x-filament::button 
+                    wire:click="fixPermissions" 
+                    size="sm" 
+                    color="gray" 
+                    icon="heroicon-m-shield-check"
+                    tooltip="Reset correct ownership (siteuser:www-data) and permissions (775/664)"
+                >
+                    Fix Permissions
+                </x-filament::button>
+
                 <div wire:loading wire:target="uploadedFile" class="text-xs text-primary-600 font-semibold animate-pulse">
                     Uploading...
                 </div>

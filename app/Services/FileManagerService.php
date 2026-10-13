@@ -9,6 +9,12 @@ use Symfony\Component\HttpFoundation\File\Exception\AccessDeniedException;
 
 class FileManagerService
 {
+    public function __construct(
+        protected ?ServerAgentService $agentService = null
+    ) {
+        $this->agentService = $agentService ?? app(ServerAgentService::class);
+    }
+
     /**
      * Get validated absolute path jailed inside website root.
      * Prevents any path traversal or symlink escapes.
@@ -108,7 +114,20 @@ class FileManagerService
     public function putFileContent(Website $website, string $relativePath, string $content): void
     {
         $path = $this->resolveSafePath($website, $relativePath);
-        file_put_contents($path, $content);
+
+        // Try direct write first
+        if (@file_put_contents($path, $content) !== false) {
+            @chmod($path, 0664);
+            return;
+        }
+
+        // Privileged fallback via vps-agent
+        $this->agentService->execute('ManageWebsiteFile', [
+            'action' => 'write',
+            'path' => $path,
+            'content' => $content,
+            'user' => $website->system_user,
+        ], 'Website', (string) $website->id);
     }
 
     /**
@@ -128,7 +147,17 @@ class FileManagerService
             throw new \InvalidArgumentException("A file or folder named '{$cleanName}' already exists");
         }
 
-        file_put_contents($target, $initialContent);
+        if (@file_put_contents($target, $initialContent) === false) {
+            $this->agentService->execute('ManageWebsiteFile', [
+                'action' => 'write',
+                'path' => $target,
+                'content' => $initialContent,
+                'user' => $website->system_user,
+            ], 'Website', (string) $website->id);
+        } else {
+            @chmod($target, 0664);
+        }
+
         return $subPath;
     }
 
@@ -144,7 +173,13 @@ class FileManagerService
 
         $target = $this->resolveSafePath($website, $relativePath . '/' . $cleanName);
         if (! is_dir($target)) {
-            mkdir($target, 0755, true);
+            if (! @mkdir($target, 0775, true)) {
+                $this->agentService->execute('ManageWebsiteFile', [
+                    'action' => 'mkdir',
+                    'path' => $target,
+                    'user' => $website->system_user,
+                ], 'Website', (string) $website->id);
+            }
         }
     }
 
@@ -171,7 +206,14 @@ class FileManagerService
             throw new \InvalidArgumentException("An item with name '{$cleanName}' already exists");
         }
 
-        rename($oldTarget, $newTarget);
+        if (! @rename($oldTarget, $newTarget)) {
+            $this->agentService->execute('ManageWebsiteFile', [
+                'action' => 'rename',
+                'path' => $oldTarget,
+                'new_path' => $newTarget,
+                'user' => $website->system_user,
+            ], 'Website', (string) $website->id);
+        }
     }
 
     /**
@@ -180,10 +222,19 @@ class FileManagerService
     public function deleteItem(Website $website, string $relativePath): void
     {
         $path = $this->resolveSafePath($website, $relativePath);
+        $deleted = false;
         if (is_dir($path)) {
-            File::deleteDirectory($path);
+            $deleted = @File::deleteDirectory($path);
         } elseif (is_file($path)) {
-            unlink($path);
+            $deleted = @unlink($path);
+        }
+
+        if (! $deleted && file_exists($path)) {
+            $this->agentService->execute('ManageWebsiteFile', [
+                'action' => 'delete',
+                'path' => $path,
+                'user' => $website->system_user,
+            ], 'Website', (string) $website->id);
         }
     }
 
@@ -194,7 +245,33 @@ class FileManagerService
     {
         $destDir = $this->resolveSafePath($website, $relativePath);
         $fileName = preg_replace('/[^a-zA-Z0-9._-]/', '', $file->getClientOriginalName());
-        $file->move($destDir, $fileName);
+        try {
+            $file->move($destDir, $fileName);
+            @chmod($destDir . DIRECTORY_SEPARATOR . $fileName, 0664);
+        } catch (\Throwable $e) {
+            $tempPath = storage_path('app/temp_upload_' . uniqid() . '_' . $fileName);
+            $file->move(dirname($tempPath), basename($tempPath));
+            $targetPath = $destDir . DIRECTORY_SEPARATOR . $fileName;
+            $this->agentService->execute('ManageWebsiteFile', [
+                'action' => 'write',
+                'path' => $targetPath,
+                'content' => file_get_contents($tempPath),
+                'user' => $website->system_user,
+            ], 'Website', (string) $website->id);
+            @unlink($tempPath);
+        }
+    }
+
+    /**
+     * Fix permissions for an entire website.
+     */
+    public function fixPermissions(Website $website): void
+    {
+        $this->agentService->execute('ManageWebsiteFile', [
+            'action' => 'fix_permissions',
+            'path' => $website->document_root,
+            'user' => $website->system_user,
+        ], 'Website', (string) $website->id);
     }
 
     protected function formatBytes(int $bytes): string

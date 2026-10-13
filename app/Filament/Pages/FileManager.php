@@ -275,4 +275,19 @@ class FileManager extends Page implements HasForms
             Notification::make()->title('Download error')->body($e->getMessage())->danger()->send();
         }
     }
+
+    public function fixPermissions(): void
+    {
+        $site = $this->selectedWebsite;
+        if (! $site) {
+            return;
+        }
+
+        try {
+            app(FileManagerService::class)->fixPermissions($site);
+            Notification::make()->title('File permissions repaired successfully')->success()->send();
+        } catch (\Throwable $e) {
+            Notification::make()->title('Repair permissions failed')->body($e->getMessage())->danger()->send();
+        }
+    }
 }

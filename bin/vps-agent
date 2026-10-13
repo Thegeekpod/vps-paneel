@@ -768,6 +768,14 @@ EOT;
                     @chgrp($path, 'www-data');
                 }
             }
+        } elseif ($action === 'rename') {
+            $newPath = $this->validateSafePath($payload['new_path'] ?? '');
+            if (! str_starts_with($newPath, '/home/') && ! str_starts_with($newPath, storage_path())) {
+                throw new \InvalidArgumentException("ManageWebsiteFile target path must be inside /home/");
+            }
+            if (file_exists($path)) {
+                rename($path, $newPath);
+            }
         } elseif ($action === 'fix_permissions') {
             if ($user && is_dir("/home/{$user}/web")) {
                 $this->execCommand('chown', ['-R', "{$user}:www-data", "/home/{$user}/web"]);
