@@ -305,11 +305,16 @@ if [[ -z "$ADMIN_PASSWORD" ]]; then
 fi
 sudo -u "$PANEL_USER" php artisan vps:create-admin --email="$ADMIN_EMAIL" --password="$ADMIN_PASSWORD" --name="Administrator"
 
-# Publish Filament assets
+# Publish Filament assets and cache
 sudo -u "$PANEL_USER" php artisan filament:assets || true
 sudo -u "$PANEL_USER" php artisan config:cache
 sudo -u "$PANEL_USER" php artisan route:cache
 sudo -u "$PANEL_USER" php artisan view:cache
+
+# Set final ownership and write permissions for web server (www-data)
+chown -R www-data:www-data "$INSTALL_DIR/database" "$INSTALL_DIR/storage" "$INSTALL_DIR/bootstrap/cache"
+chmod -R 777 "$INSTALL_DIR/database" "$INSTALL_DIR/storage" "$INSTALL_DIR/bootstrap/cache"
+chmod 666 "$INSTALL_DIR/database/database.sqlite" 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
 # 7. Nginx VirtualHost for Control Panel
