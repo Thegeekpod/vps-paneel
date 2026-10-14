@@ -187,7 +187,10 @@ def setup_phpmyadmin_service() -> Tuple[bool, str]:
     if os.name == 'nt':
         return True, "Simulation: phpMyAdmin configured on port 888"
 
-    script = """#!/usr/bin/env bash
+    from app.config import BASE_DIR
+    bundled_file = BASE_DIR / "app" / "static" / "adminer.php"
+    
+    script = f"""#!/usr/bin/env bash
 set -e
 DEBIAN_FRONTEND=noninteractive apt-get update -y >/dev/null 2>&1 || true
 DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml >/dev/null 2>&1 || true
@@ -198,60 +201,42 @@ if [[ -z "$PHP_SOCK" ]]; then
 fi
 
 mkdir -p /var/www/phpmyadmin
-if [[ ! -f "/var/www/phpmyadmin/index.php" ]]; then
-    PMA_TMP="/tmp/pma.tar.gz"
-    curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz" -o "$PMA_TMP" || \
-    curl -sSL "https://www.phpmyadmin.net/downloads/phpMyAdmin-latest-all-languages.tar.gz" -o "$PMA_TMP" || true
-
-    if [[ -f "$PMA_TMP" && -s "$PMA_TMP" ]]; then
-        tar -xzf "$PMA_TMP" -C /var/www/phpmyadmin --strip-components=1 2>/dev/null || true
-        rm -f "$PMA_TMP"
-    fi
-
-    if [[ ! -f "/var/www/phpmyadmin/index.php" ]]; then
-        curl -sSL "https://github.com/vrana/adminer/releases/download/v4.8.1/adminer-4.8.1.php" -o "/var/www/phpmyadmin/index.php"
-    fi
-
-    if [[ -f "/var/www/phpmyadmin/config.sample.inc.php" ]]; then
-        cp /var/www/phpmyadmin/config.sample.inc.php /var/www/phpmyadmin/config.inc.php
-        BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vps_panel_blowfish_key_32_chars")
-        sed -i "s|\$cfg\\['blowfish_secret'\\] = '';|\$cfg\\['blowfish_secret'\\] = '${BLOWFISH}';|g" /var/www/phpmyadmin/config.inc.php
-    fi
-
-    chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
-    chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
+if [[ -f "{bundled_file}" ]]; then
+    cp -f "{bundled_file}" /var/www/phpmyadmin/index.php
 fi
 
+chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
+chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
+
 cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF'
-server {
+server {{
     listen 888 default_server;
     listen [::]:888 default_server;
     server_name _;
     root /var/www/phpmyadmin;
     index index.php index.html index.htm;
 
-    location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
+    location / {{
+        try_files $uri $uri/ /index.php?$query_string;
+    }}
 
-    location ~ \.php$ {
+    location ~ \\.php$ {{
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
-        include fastcgi_params;
-    }
-}
+        fastcgi_param SCRIPT_FILENAME /var/www/phpmyadmin$fastcgi_script_name;
+    }}
+}}
 EOF
-sed -i "s|PHP_SOCK_PLACEHOLDER|${PHP_SOCK}|g" /etc/nginx/sites-available/phpmyadmin.conf
+sed -i "s|PHP_SOCK_PLACEHOLDER|${{PHP_SOCK}}|g" /etc/nginx/sites-available/phpmyadmin.conf
 ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
 ufw allow 888/tcp 2>/dev/null || true
 nginx -t && (systemctl reload nginx || systemctl restart nginx)
 """
     try:
-        res = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+        res = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
         if res.returncode != 0:
             return False, res.stderr or res.stdout
-        return True, "phpMyAdmin configured on port 888"
+        return True, "Database manager configured on port 888"
     except Exception as e:
         return False, str(e)
 

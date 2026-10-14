@@ -139,6 +139,36 @@ server {
 EOF
 ln -sf /etc/nginx/sites-available/00-default-catchall.conf /etc/nginx/sites-enabled/00-default-catchall.conf
 
+# Setup Database Web Manager on Port 888
+mkdir -p /var/www/phpmyadmin
+if [[ -f "$SCRIPT_DIR/app/static/adminer.php" ]]; then
+    cp -f "$SCRIPT_DIR/app/static/adminer.php" /var/www/phpmyadmin/index.php
+fi
+chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
+chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
+
+PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
+if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
+
+cat > /etc/nginx/sites-available/phpmyadmin.conf << EOF
+server {
+    listen 888 default_server;
+    listen [::]:888 default_server;
+    server_name _;
+    root /var/www/phpmyadmin;
+    index index.php index.html index.htm;
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:${PHP_SOCK};
+        fastcgi_param SCRIPT_FILENAME /var/www/phpmyadmin\$fastcgi_script_name;
+    }
+}
+EOF
+ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
+
 nginx -t
 systemctl restart nginx || systemctl start nginx
 systemctl enable nginx 2>/dev/null || true

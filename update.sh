@@ -41,32 +41,21 @@ if ! command -v mysql &> /dev/null && ! command -v mariadb &> /dev/null; then
 fi
 mkdir -p /www/backup/database
 
-# Setup phpMyAdmin & PHP-FPM if missing
-if [[ ! -f "/var/www/phpmyadmin/index.php" ]]; then
-    echo "[-] Setting up phpMyAdmin on Port 888..."
-    DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml >/dev/null 2>&1 || true
-    PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
-    if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
+# Setup Database Web Manager (phpMyAdmin / Adminer)
+echo "[-] Setting up Database Web Manager on Port 888..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml >/dev/null 2>&1 || true
+PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
+if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
 
-    mkdir -p /var/www/phpmyadmin
-    PMA_TMP="/tmp/pma.tar.gz"
-    curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz" -o "$PMA_TMP" 2>/dev/null || true
-    if [[ -f "$PMA_TMP" && -s "$PMA_TMP" ]]; then
-        tar -xzf "$PMA_TMP" -C /var/www/phpmyadmin --strip-components=1 2>/dev/null || true
-        rm -f "$PMA_TMP"
-    fi
-    if [[ ! -f "/var/www/phpmyadmin/index.php" ]]; then
-        curl -sSL "https://github.com/vrana/adminer/releases/download/v4.8.1/adminer-4.8.1.php" -o "/var/www/phpmyadmin/index.php" 2>/dev/null || true
-    fi
-    if [[ -f "/var/www/phpmyadmin/config.sample.inc.php" ]]; then
-        cp /var/www/phpmyadmin/config.sample.inc.php /var/www/phpmyadmin/config.inc.php
-        BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vps_panel_blowfish_key_32_chars")
-        sed -i "s|\$cfg\\['blowfish_secret'\\] = '';|\$cfg\\['blowfish_secret'\\] = '${BLOWFISH}';|g" /var/www/phpmyadmin/config.inc.php
-    fi
-    chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
-    chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
+mkdir -p /var/www/phpmyadmin
+if [[ -f "$SCRIPT_DIR/app/static/adminer.php" ]]; then
+    cp -f "$SCRIPT_DIR/app/static/adminer.php" /var/www/phpmyadmin/index.php
+fi
 
-    cat > /etc/nginx/sites-available/phpmyadmin.conf << EOF
+chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
+chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
+
+cat > /etc/nginx/sites-available/phpmyadmin.conf << EOF
 server {
     listen 888 default_server;
     listen [::]:888 default_server;
@@ -79,14 +68,12 @@ server {
     location ~ \\.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:${PHP_SOCK};
-        fastcgi_param SCRIPT_FILENAME \\\$document_root\\\$fastcgi_script_name;
-        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /var/www/phpmyadmin\\\$fastcgi_script_name;
     }
 }
 EOF
-    ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
-    nginx -t 2>/dev/null && (systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null) || true
-fi
+ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
+nginx -t 2>/dev/null && (systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null) || true
 
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1 || true
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
