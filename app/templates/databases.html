@@ -69,9 +69,14 @@
             <button onclick="openModal('addDbModal')" class="btn btn-primary" style="font-size: 13px; padding: 8px 16px;">
                 <span>+</span> Add Database
             </button>
+            {% if databases %}
+            <a href="/databases/{{ databases[0].db_name }}/manage" class="btn btn-primary" style="background: linear-gradient(135deg, #0284c7, #0369a1); border: none; font-weight: 700; font-size: 13px; padding: 8px 16px; text-decoration: none;">
+                <span>⚡</span> Web DB Manager (phpMyAdmin UI)
+            </a>
+            {% endif %}
             {% if pma_ready %}
-            <a href="{{ pma_url }}" target="_blank" class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b, #d97706); border: none; font-weight: 700; font-size: 13px; padding: 8px 16px; text-decoration: none;">
-                <span>🔗</span> Open phpMyAdmin (:888)
+            <a href="{{ pma_url }}" target="_blank" class="btn btn-secondary" style="border-color: #f59e0b; color: #f59e0b; font-weight: 700; font-size: 13px; padding: 8px 16px; text-decoration: none;">
+                <span>🔗</span> phpMyAdmin (:888)
             </a>
             {% else %}
             <button onclick="setupPma()" class="btn btn-secondary" style="border-color: #f59e0b; color: #f59e0b; font-size: 13px; padding: 8px 16px;" id="btnSetupPma">
@@ -134,9 +139,14 @@
                     <td style="color: var(--text-muted); font-size: 12px;">{{ db.note or '-' }}</td>
                     <td style="text-align: right;">
                         <div style="display: inline-flex; gap: 6px;">
-                            <a href="{{ pma_url }}" target="_blank" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="View database in phpMyAdmin">
-                                🔗 phpMyAdmin
+                            <a href="/databases/{{ db.db_name }}/manage" class="btn btn-primary" style="padding: 4px 10px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #0284c7, #0369a1); border: none; text-decoration: none;" title="Manage tables and browse data in phpMyAdmin-style UI">
+                                ⚡ Manage
                             </a>
+                            {% if pma_ready %}
+                            <a href="{{ pma_url }}" target="_blank" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="Open in external phpMyAdmin (:888)">
+                                🔗 :888
+                            </a>
+                            {% endif %}
                             <button onclick="backupDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Create Backup">
                                 💾 Backup
                             </button>

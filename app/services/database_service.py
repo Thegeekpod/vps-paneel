@@ -181,134 +181,302 @@ def execute_query_console(query: str, db_name: Optional[str] = None) -> Dict[str
         return {"success": False, "error": str(e)}
 
 def is_phpmyadmin_ready() -> bool:
-    return Path("/var/www/phpmyadmin/index.php").exists()
+    pma = Path("/var/www/phpmyadmin")
+    return (pma / "index.php").exists() and (pma / "libraries").exists()
 
 def setup_phpmyadmin_service() -> Tuple[bool, str]:
     if os.name == 'nt':
         return True, "Simulation: phpMyAdmin configured on port 888"
 
-    from app.config import BASE_DIR
-    bundled_file = BASE_DIR / "app" / "static" / "adminer.php"
-    
-    script = f"""#!/usr/bin/env bash
+    script = """#!/usr/bin/env bash
 set -e
+PMA_DIR="/var/www/phpmyadmin"
+mkdir -p "$PMA_DIR"
+
 DEBIAN_FRONTEND=noninteractive apt-get update -y >/dev/null 2>&1 || true
-DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml >/dev/null 2>&1 || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml curl tar gzip >/dev/null 2>&1 || true
 
 PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
 if [[ -z "$PHP_SOCK" ]]; then
     PHP_SOCK="/run/php/php8.3-fpm.sock"
 fi
 
-mkdir -p /var/www/phpmyadmin
-if [[ -f "{bundled_file}" ]]; then
-    cp -f "{bundled_file}" /var/www/phpmyadmin/index.php
+PMA_TAR="/tmp/pma.tar.gz"
+echo "Downloading official phpMyAdmin 5.2.1..."
+curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz" -o "$PMA_TAR" || \
+curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-english.tar.gz" -o "$PMA_TAR"
+
+if [[ -f "$PMA_TAR" && -s "$PMA_TAR" ]]; then
+    rm -rf "${PMA_DIR:?}"/*
+    tar -xzf "$PMA_TAR" -C "$PMA_DIR" --strip-components=1
+    rm -f "$PMA_TAR"
+
+    if [[ -f "$PMA_DIR/config.sample.inc.php" ]]; then
+        cp "$PMA_DIR/config.sample.inc.php" "$PMA_DIR/config.inc.php"
+        BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vpspanelblowfishsecretkey123456")
+        sed -i "s|\\$cfg\\['blowfish_secret'\\] = '';|\\$cfg\\['blowfish_secret'\\] = '${BLOWFISH}';|g" "$PMA_DIR/config.inc.php"
+        echo "\\$cfg['Servers'][1]['AllowNoPassword'] = true;" >> "$PMA_DIR/config.inc.php"
+    fi
+    mkdir -p "$PMA_DIR/tmp"
+    chmod 777 "$PMA_DIR/tmp"
 fi
 
-chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
-chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
+mkdir -p /var/www/html
+ln -sfn "$PMA_DIR" /var/www/html/phpmyadmin 2>/dev/null || true
+
+chown -R www-data:www-data "$PMA_DIR" 2>/dev/null || true
+chmod -R 755 "$PMA_DIR" 2>/dev/null || true
 
 cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF'
-server {{
+server {
     listen 888 default_server;
     listen [::]:888 default_server;
     server_name _;
     root /var/www/phpmyadmin;
     index index.php index.html index.htm;
 
-    location / {{
-        try_files $uri $uri/ /index.php?$query_string;
-    }}
+    client_max_body_size 256M;
 
-    location ~ \\.php$ {{
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    }}
-}}
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
 EOF
-sed -i "s|PHP_SOCK_PLACEHOLDER|${{PHP_SOCK}}|g" /etc/nginx/sites-available/phpmyadmin.conf
+sed -i "s|PHP_SOCK_PLACEHOLDER|${PHP_SOCK}|g" /etc/nginx/sites-available/phpmyadmin.conf
 ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
 ufw allow 888/tcp 2>/dev/null || true
 nginx -t && (systemctl reload nginx || systemctl restart nginx)
 """
     try:
-        res = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+        res = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=240)
         if res.returncode != 0:
             return False, res.stderr or res.stdout
-        return True, "Database manager configured on port 888"
+        return True, "phpMyAdmin 5.2.1 installed and running on port 888"
     except Exception as e:
         return False, str(e)
 
 def ensure_database_manager():
-    """Self-healing setup for /var/www/phpmyadmin and port 888."""
+    """Ensure phpMyAdmin service is running if directory exists."""
     if os.name == 'nt':
         return
-
-    from app.config import BASE_DIR
     pma_dir = Path("/var/www/phpmyadmin")
-    pma_dir.mkdir(parents=True, exist_ok=True)
-    index_file = pma_dir / "index.php"
+    if pma_dir.exists() and (pma_dir / "index.php").exists() and (pma_dir / "libraries").exists():
+        pma_conf = Path("/etc/nginx/sites-available/phpmyadmin.conf")
+        pma_enabled = Path("/etc/nginx/sites-enabled/phpmyadmin.conf")
+        if not pma_conf.exists() or not pma_enabled.exists():
+            setup_phpmyadmin_service()
 
-    bundled_file = BASE_DIR / "app" / "static" / "adminer.php"
-    if bundled_file.exists():
-        if not index_file.exists() or index_file.stat().st_size < 10000:
-            try:
-                shutil.copyfile(bundled_file, index_file)
-                os.chmod(index_file, 0o755)
-                shutil.chown(index_file, user="www-data", group="www-data")
-            except Exception:
-                pass
+def get_database_tables(db_name: str) -> List[Dict[str, Any]]:
+    """Fetch tables list with engine, row count, collation and size for a database."""
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name):
+        return []
 
+    sql = f"""
+    SELECT 
+        TABLE_NAME, 
+        IFNULL(ENGINE, 'InnoDB') as ENGINE, 
+        IFNULL(TABLE_ROWS, 0) as TABLE_ROWS, 
+        IFNULL(DATA_LENGTH, 0) as DATA_LENGTH, 
+        IFNULL(INDEX_LENGTH, 0) as INDEX_LENGTH, 
+        IFNULL(TABLE_COLLATION, 'utf8mb4_unicode_ci') as TABLE_COLLATION, 
+        IFNULL(TABLE_COMMENT, '') as TABLE_COMMENT 
+    FROM information_schema.TABLES 
+    WHERE TABLE_SCHEMA = '{db_name}' 
+    ORDER BY TABLE_NAME ASC;
+    """
+    cmd = ["mysql", "-u", "root", "--batch", "--raw", "-e", sql]
     try:
-        shutil.chown(pma_dir, user="www-data", group="www-data")
-        os.chmod(pma_dir, 0o755)
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        if res.returncode != 0:
+            return []
+        lines = [l for l in res.stdout.strip().split("\n") if l.strip()]
+        if len(lines) < 2:
+            return []
+        
+        tables = []
+        for line in lines[1:]:
+            parts = line.split("\t")
+            if len(parts) >= 7:
+                data_len = int(parts[3]) if parts[3].isdigit() else 0
+                idx_len = int(parts[4]) if parts[4].isdigit() else 0
+                total_mb = (data_len + idx_len) / (1024 * 1024)
+                tables.append({
+                    "name": parts[0],
+                    "engine": parts[1],
+                    "rows": int(parts[2]) if parts[2].isdigit() else 0,
+                    "data_size": f"{data_len / 1024:.1f} KB" if data_len < 1048576 else f"{data_len / 1048576:.2f} MB",
+                    "index_size": f"{idx_len / 1024:.1f} KB" if idx_len < 1048576 else f"{idx_len / 1048576:.2f} MB",
+                    "total_size": f"{total_mb:.2f} MB" if total_mb >= 0.1 else f"{(data_len + idx_len) / 1024:.1f} KB",
+                    "collation": parts[5],
+                    "comment": parts[6]
+                })
+        return tables
+    except Exception:
+        return []
+
+def get_table_schema(db_name: str, table_name: str) -> List[Dict[str, Any]]:
+    """Fetch column structure for a given table."""
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name) or not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        return []
+
+    sql = f"""
+    SELECT 
+        COLUMN_NAME, 
+        COLUMN_TYPE, 
+        IS_NULLABLE, 
+        COLUMN_KEY, 
+        IFNULL(COLUMN_DEFAULT, 'NULL') as COLUMN_DEFAULT, 
+        EXTRA, 
+        IFNULL(COLLATION_NAME, '') as COLLATION_NAME, 
+        IFNULL(COLUMN_COMMENT, '') as COLUMN_COMMENT 
+    FROM information_schema.COLUMNS 
+    WHERE TABLE_SCHEMA = '{db_name}' AND TABLE_NAME = '{table_name}' 
+    ORDER BY ORDINAL_POSITION ASC;
+    """
+    cmd = ["mysql", "-u", "root", "--batch", "--raw", "-e", sql]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
+        if res.returncode != 0:
+            return []
+        lines = [l for l in res.stdout.strip().split("\n") if l.strip()]
+        if len(lines) < 2:
+            return []
+        
+        cols = []
+        for line in lines[1:]:
+            parts = line.split("\t")
+            if len(parts) >= 8:
+                cols.append({
+                    "name": parts[0],
+                    "type": parts[1],
+                    "nullable": parts[2],
+                    "key": parts[3],
+                    "default": parts[4],
+                    "extra": parts[5],
+                    "collation": parts[6],
+                    "comment": parts[7]
+                })
+        return cols
+    except Exception:
+        return []
+
+def get_table_data(db_name: str, table_name: str, page: int = 1, page_size: int = 25, search: str = "") -> Dict[str, Any]:
+    """Fetch paginated rows from a table."""
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name) or not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        return {"columns": [], "rows": [], "total_rows": 0, "page": 1, "total_pages": 1}
+
+    offset = max(0, (page - 1) * page_size)
+    
+    # Get total count
+    count_sql = f"SELECT COUNT(*) FROM `{db_name}`.`{table_name}`;"
+    total_rows = 0
+    try:
+        res_count = subprocess.run(["mysql", "-u", "root", "--batch", "--raw", "-e", count_sql], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+        if res_count.returncode == 0:
+            lines = res_count.stdout.strip().split("\n")
+            if len(lines) >= 2 and lines[1].strip().isdigit():
+                total_rows = int(lines[1].strip())
     except Exception:
         pass
 
-    # Ensure symlink in /var/www/html/phpmyadmin
+    # Query rows
+    data_sql = f"SELECT * FROM `{db_name}`.`{table_name}` LIMIT {page_size} OFFSET {offset};"
+    cmd = ["mysql", "-u", "root", "--batch", "--raw", "-e", data_sql]
     try:
-        html_pma = Path("/var/www/html/phpmyadmin")
-        if not html_pma.exists():
-            html_pma.symlink_to(pma_dir)
-    except Exception:
-        pass
+        start_time = datetime.now()
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+        exec_duration = (datetime.now() - start_time).total_seconds()
+        if res.returncode != 0:
+            return {"columns": [], "rows": [], "total_rows": total_rows, "page": page, "total_pages": 1, "error": res.stderr.strip()}
 
-    # Ensure Nginx config on port 888
-    pma_conf = Path("/etc/nginx/sites-available/phpmyadmin.conf")
-    pma_enabled = Path("/etc/nginx/sites-enabled/phpmyadmin.conf")
+        raw_lines = res.stdout.split("\n")
+        lines = [l for l in raw_lines if l != ""]
+        if not lines:
+            # Query succeeded but 0 rows; get column names
+            cols_schema = get_table_schema(db_name, table_name)
+            return {
+                "columns": [c["name"] for c in cols_schema],
+                "rows": [],
+                "total_rows": total_rows,
+                "page": page,
+                "total_pages": max(1, (total_rows + page_size - 1) // page_size),
+                "duration": f"{exec_duration:.4f}"
+            }
 
-    php_sock = "/run/php/php8.3-fpm.sock"
-    php_socks = list(Path("/run/php").glob("php*-fpm.sock"))
-    if php_socks:
-        php_sock = str(sorted(php_socks)[-1])
+        columns = lines[0].split("\t")
+        rows = [line.split("\t") for line in lines[1:]]
 
-    nginx_config = f"""server {{
-    listen 888 default_server;
-    listen [::]:888 default_server;
-    server_name _;
-    root /var/www/phpmyadmin;
-    index index.php index.html index.htm;
+        total_pages = max(1, (total_rows + page_size - 1) // page_size)
+        return {
+            "columns": columns,
+            "rows": rows,
+            "total_rows": total_rows,
+            "page": page,
+            "total_pages": total_pages,
+            "duration": f"{exec_duration:.4f}"
+        }
+    except Exception as e:
+        return {"columns": [], "rows": [], "total_rows": total_rows, "page": page, "total_pages": 1, "error": str(e)}
 
-    location / {{
-        try_files $uri $uri/ /index.php?$query_string;
-    }}
+def execute_raw_sql(db_name: str, sql: str) -> Dict[str, Any]:
+    """Execute raw SQL in db_name and return structured rows or affected count."""
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name):
+        return {"success": False, "error": "Invalid database name"}
 
-    location ~ \\.php$ {{
-        include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:{php_sock};
-        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    }}
-}}
-"""
+    clean_sql = sql.strip()
+    if not clean_sql:
+        return {"success": False, "error": "Query cannot be empty"}
+
+    cmd = ["mysql", "-u", "root", "--batch", "--raw", db_name, "-e", clean_sql]
     try:
-        if Path("/etc/nginx/sites-available").exists():
-            pma_conf.write_text(nginx_config)
-            if not pma_enabled.exists() and not pma_enabled.is_symlink():
-                pma_enabled.symlink_to(pma_conf)
-            subprocess.run(["nginx", "-t"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-            subprocess.run(["systemctl", "reload", "nginx"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-    except Exception:
-        pass
+        start_time = datetime.now()
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+        exec_duration = (datetime.now() - start_time).total_seconds()
+        if res.returncode != 0:
+            return {"success": False, "error": res.stderr.strip() or res.stdout.strip()}
+
+        raw_out = res.stdout.strip()
+        if not raw_out:
+            return {"success": True, "type": "action", "message": f"Query executed successfully in {exec_duration:.4f}s"}
+
+        lines = raw_out.split("\n")
+        columns = lines[0].split("\t")
+        rows = [l.split("\t") for l in lines[1:] if l.strip()]
+
+        return {
+            "success": True,
+            "type": "result",
+            "columns": columns,
+            "rows": rows,
+            "count": len(rows),
+            "duration": f"{exec_duration:.4f}"
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+def truncate_table(db_name: str, table_name: str) -> Tuple[bool, str]:
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name) or not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        return False, "Invalid database or table name"
+    return run_mysql_command(f"TRUNCATE TABLE `{db_name}`.`{table_name}`;")
+
+def drop_table(db_name: str, table_name: str) -> Tuple[bool, str]:
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name) or not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        return False, "Invalid database or table name"
+    return run_mysql_command(f"DROP TABLE IF EXISTS `{db_name}`.`{table_name}`;")
+
+def optimize_table(db_name: str, table_name: str) -> Tuple[bool, str]:
+    if not re.match(r'^[a-zA-Z0-9_]+$', db_name) or not re.match(r'^[a-zA-Z0-9_]+$', table_name):
+        return False, "Invalid database or table name"
+    return run_mysql_command(f"OPTIMIZE TABLE `{db_name}`.`{table_name}`;")
 
 

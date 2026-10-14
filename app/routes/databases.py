@@ -20,6 +20,13 @@ from app.services.database_service import (
     is_phpmyadmin_ready,
     setup_phpmyadmin_service,
     ensure_database_manager,
+    get_database_tables,
+    get_table_schema,
+    get_table_data,
+    execute_raw_sql,
+    truncate_table,
+    drop_table,
+    optimize_table,
     BACKUP_DIR
 )
 from app.services.system_service import get_service_status
@@ -304,3 +311,125 @@ async def run_sql_query(
     result = execute_query_console(query, db_name)
     log_action(user["username"], "SQLQuery", f"Executed query on {db_name or 'global'}", request.client.host)
     return JSONResponse(result)
+
+@router.get("/{db_name}/manage", response_class=HTMLResponse)
+async def database_manage_view(
+    db_name: str,
+    request: Request,
+    table: Optional[str] = None,
+    tab: Optional[str] = "structure",
+    user: dict = Depends(login_required)
+):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM databases ORDER BY db_name ASC")
+    all_dbs = [dict(r) for r in cursor.fetchall()]
+    conn.close()
+
+    # Get tables in db_name
+    tables = get_database_tables(db_name)
+    
+    active_table = table
+    if not active_table and tables:
+        # If no table passed, stay on database overview or select first
+        pass
+
+    schema = []
+    data_res = {"columns": [], "rows": [], "total_rows": 0, "page": 1, "total_pages": 1}
+    if active_table:
+        schema = get_table_schema(db_name, active_table)
+        data_res = get_table_data(db_name, active_table, page=1, page_size=25)
+
+    server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
+    pma_url = f"http://{server_ip}:888"
+
+    return render("database_manager.html", {
+        "user": user,
+        "db_name": db_name,
+        "all_dbs": all_dbs,
+        "tables": tables,
+        "active_table": active_table,
+        "active_tab": tab,
+        "schema": schema,
+        "data": data_res,
+        "pma_url": pma_url,
+        "server_ip": server_ip,
+        "active_nav": "databases"
+    }, request)
+
+@router.get("/api/{db_name}/tables")
+async def api_get_tables(db_name: str, user: dict = Depends(login_required)):
+    tables = get_database_tables(db_name)
+    return JSONResponse({"success": True, "tables": tables})
+
+@router.get("/api/{db_name}/table/{table_name}/schema")
+async def api_get_table_schema(db_name: str, table_name: str, user: dict = Depends(login_required)):
+    schema = get_table_schema(db_name, table_name)
+    return JSONResponse({"success": True, "schema": schema})
+
+@router.get("/api/{db_name}/table/{table_name}/data")
+async def api_get_table_data(
+    db_name: str, 
+    table_name: str, 
+    page: int = 1, 
+    page_size: int = 25, 
+    search: str = "",
+    user: dict = Depends(login_required)
+):
+    data = get_table_data(db_name, table_name, page=page, page_size=page_size, search=search)
+    return JSONResponse({"success": True, **data})
+
+@router.post("/api/{db_name}/execute")
+async def api_execute_query(
+    db_name: str,
+    request: Request,
+    query: str = Form(...),
+    user: dict = Depends(login_required)
+):
+    result = execute_raw_sql(db_name, query)
+    log_action(user["username"], "SQLExecute", f"Ran custom query in {db_name}", request.client.host)
+    return JSONResponse(result)
+
+@router.post("/api/{db_name}/table/{table_name}/truncate")
+async def api_truncate_table(
+    db_name: str, 
+    table_name: str, 
+    request: Request,
+    user: dict = Depends(login_required)
+):
+    success, msg = truncate_table(db_name, table_name)
+    log_action(user["username"], "TruncateTable", f"Truncated {db_name}.{table_name}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
+@router.post("/api/{db_name}/table/{table_name}/drop")
+async def api_drop_table(
+    db_name: str, 
+    table_name: str, 
+    request: Request,
+    user: dict = Depends(login_required)
+):
+    success, msg = drop_table(db_name, table_name)
+    log_action(user["username"], "DropTable", f"Dropped {db_name}.{table_name}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
+@router.post("/api/{db_name}/table/{table_name}/optimize")
+async def api_optimize_table(
+    db_name: str, 
+    table_name: str, 
+    request: Request,
+    user: dict = Depends(login_required)
+):
+    success, msg = optimize_table(db_name, table_name)
+    return JSONResponse({"success": success, "message": msg})
+
+@router.get("/{db_name}/export")
+async def export_database_dump(db_name: str, user: dict = Depends(login_required)):
+    success, filename, full_path, size_bytes = backup_db(db_name)
+    if not success or not Path(full_path).exists():
+        raise HTTPException(status_code=500, detail="Failed to generate database export dump")
+    return FileResponse(
+        path=full_path, 
+        filename=filename, 
+        media_type="application/sql"
+    )
+

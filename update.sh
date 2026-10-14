@@ -41,15 +41,31 @@ if ! command -v mysql &> /dev/null && ! command -v mariadb &> /dev/null; then
 fi
 mkdir -p /www/backup/database
 
-# Setup Database Web Manager (phpMyAdmin / Adminer)
-echo "[-] Setting up Database Web Manager on Port 888..."
-DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml >/dev/null 2>&1 || true
+# Setup Database Web Manager (official phpMyAdmin 5.2.1)
+echo "[-] Setting up official phpMyAdmin on Port 888..."
+DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml curl tar gzip >/dev/null 2>&1 || true
 PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
 if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
 
 mkdir -p /var/www/phpmyadmin
-if [[ -f "$SCRIPT_DIR/app/static/adminer.php" ]]; then
-    cp -f "$SCRIPT_DIR/app/static/adminer.php" /var/www/phpmyadmin/index.php
+if [[ ! -d "/var/www/phpmyadmin/libraries" ]]; then
+    echo "Downloading official phpMyAdmin 5.2.1..."
+    PMA_TMP="/tmp/pma.tar.gz"
+    curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz" -o "$PMA_TMP" || \
+    curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-english.tar.gz" -o "$PMA_TMP" || true
+    if [[ -f "$PMA_TMP" && -s "$PMA_TMP" ]]; then
+        rm -rf /var/www/phpmyadmin/*
+        tar -xzf "$PMA_TMP" -C /var/www/phpmyadmin --strip-components=1 2>/dev/null || true
+        rm -f "$PMA_TMP"
+        if [[ -f "/var/www/phpmyadmin/config.sample.inc.php" ]]; then
+            cp /var/www/phpmyadmin/config.sample.inc.php /var/www/phpmyadmin/config.inc.php
+            BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vpspanelblowfishsecretkey123456")
+            sed -i "s|\$cfg\['blowfish_secret'\] = '';|\$cfg\['blowfish_secret'\] = '${BLOWFISH}';|g" /var/www/phpmyadmin/config.inc.php
+            echo "\$cfg['Servers'][1]['AllowNoPassword'] = true;" >> /var/www/phpmyadmin/config.inc.php
+        fi
+        mkdir -p /var/www/phpmyadmin/tmp
+        chmod 777 /var/www/phpmyadmin/tmp
+    fi
 fi
 
 mkdir -p /var/www/html
@@ -66,6 +82,8 @@ server {
     root /var/www/phpmyadmin;
     index index.php index.html index.htm;
 
+    client_max_body_size 256M;
+
     location / {
         try_files $uri $uri/ /index.php?$query_string;
     }
@@ -74,6 +92,10 @@ server {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+
+    location ~ /\.ht {
+        deny all;
     }
 }
 EOF

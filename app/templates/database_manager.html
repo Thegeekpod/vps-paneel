@@ -1,0 +1,833 @@
+{% extends "base.html" %}
+
+{% block title %}Web DB Manager - {{ db_name }} | VPS Panel{% endblock %}
+{% block page_title %}🗄️ Database Manager: <span style="color: var(--accent); margin-left: 6px; font-family: monospace;">{{ db_name }}</span>{% endblock %}
+
+{% block content %}
+<div style="display: flex; gap: 20px; align-items: flex-start; min-height: calc(100vh - 120px);">
+    <!-- Left Sidebar: Database Tables Navigator (phpMyAdmin style) -->
+    <div style="width: 270px; flex-shrink: 0; background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; box-shadow: var(--shadow-sm); position: sticky; top: 80px; max-height: calc(100vh - 100px); display: flex; flex-direction: column;">
+        
+        <!-- Database Switcher -->
+        <div style="margin-bottom: 14px;">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; display: block; margin-bottom: 6px;">Select Database</label>
+            <select class="form-control" style="font-size: 13px; font-weight: 600; padding: 7px 10px;" onchange="window.location.href='/databases/' + this.value + '/manage'">
+                {% for d in all_dbs %}
+                <option value="{{ d.db_name }}" {% if d.db_name == db_name %}selected{% endif %}>📦 {{ d.db_name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Table Search Filter -->
+        <div style="margin-bottom: 12px; position: relative;">
+            <input type="text" id="tableFilterInput" class="form-control" placeholder="Filter tables..." onkeyup="filterTables()" style="font-size: 12px; padding: 6px 10px 6px 28px;">
+            <span style="position: absolute; left: 8px; top: 7px; font-size: 12px; color: var(--text-muted);">🔍</span>
+        </div>
+
+        <!-- Quick Info -->
+        <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: var(--text-muted); margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px solid var(--border);">
+            <span>Tables: <strong id="tableCountDisplay" style="color: var(--text-primary);">{{ tables|length }}</strong></span>
+            <a href="/databases/{{ db_name }}/manage" style="color: var(--accent); text-decoration: none;" title="Overview of entire database">Overview 🏠</a>
+        </div>
+
+        <!-- Tables Tree / List -->
+        <div id="tableListContainer" style="overflow-y: auto; flex: 1; margin-right: -6px; padding-right: 6px;">
+            {% for t in tables %}
+            <div class="db-table-item {% if active_table == t.name %}active{% endif %}" data-name="{{ t.name }}" onclick="selectTable('{{ t.name }}')" style="display: flex; align-items: center; justify-content: space-between; padding: 7px 10px; border-radius: 6px; font-size: 12px; cursor: pointer; margin-bottom: 2px; transition: background 0.15s; font-family: monospace;">
+                <div style="display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    <span style="color: #38bdf8;">📄</span>
+                    <span style="font-weight: 500;">{{ t.name }}</span>
+                </div>
+                <span class="badge badge-gray" style="font-size: 10px; padding: 2px 5px;">{{ t.rows }}</span>
+            </div>
+            {% else %}
+            <div style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 20px 10px;">
+                No tables yet.<br>Create one or import SQL.
+            </div>
+            {% endfor %}
+        </div>
+
+        <div style="margin-top: 14px; pt-2; border-top: 1px solid var(--border); display: flex; gap: 6px;">
+            <button onclick="openModal('createTableModal')" class="btn btn-primary" style="flex: 1; font-size: 11px; padding: 6px;">+ New Table</button>
+            <a href="/databases/{{ db_name }}/export" class="btn btn-secondary" style="font-size: 11px; padding: 6px;" title="Export Full SQL Dump">💾 Export</a>
+        </div>
+    </div>
+
+    <!-- Right Workspace Area -->
+    <div style="flex: 1; min-width: 0;">
+        <!-- Top Toolbar Header -->
+        <div class="card" style="margin-bottom: 16px; padding: 14px 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                    <span style="font-size: 13px; color: var(--text-muted);">Database:</span>
+                    <strong style="font-size: 15px; color: var(--accent); font-family: monospace;">{{ db_name }}</strong>
+                    {% if active_table %}
+                    <span style="color: var(--text-muted);">/</span>
+                    <span style="font-size: 14px; font-weight: 700; color: #fff; font-family: monospace;">📄 {{ active_table }}</span>
+                    {% endif %}
+                    <span class="badge badge-info" style="font-size: 11px;">MariaDB/MySQL</span>
+                    <span class="badge badge-gray" style="font-size: 11px;">utf8mb4</span>
+                </div>
+
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <a href="{{ pma_url }}" target="_blank" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px; border-color: #f59e0b; color: #f59e0b;" title="Open in external phpMyAdmin (:888)">
+                        🔗 Open phpMyAdmin (:888)
+                    </a>
+                    <button onclick="openModal('importSqlModal')" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                        📥 Import SQL
+                    </button>
+                    <a href="/databases/{{ db_name }}/export" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                        📤 Export SQL
+                    </a>
+                    <a href="/databases" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                        ⬅️ Back
+                    </a>
+                </div>
+            </div>
+
+            <!-- Tab Navigation (Just like phpMyAdmin) -->
+            <div style="display: flex; gap: 4px; margin-top: 16px; border-top: 1px solid var(--border); padding-top: 12px;">
+                <button onclick="switchTab('structure')" id="tabBtn-structure" class="pma-tab-btn active">
+                    📋 Structure
+                </button>
+                <button onclick="switchTab('browse')" id="tabBtn-browse" class="pma-tab-btn" {% if not active_table %}style="opacity: 0.5;" title="Select a table first"{% endif %}>
+                    🔍 Browse Data
+                </button>
+                <button onclick="switchTab('sql')" id="tabBtn-sql" class="pma-tab-btn">
+                    💻 SQL Query
+                </button>
+                <button onclick="switchTab('operations')" id="tabBtn-operations" class="pma-tab-btn">
+                    ⚙️ Operations
+                </button>
+            </div>
+        </div>
+
+        <!-- TAB 1: STRUCTURE -->
+        <div id="tabContent-structure" class="pma-tab-content">
+            {% if active_table %}
+            <!-- Table Column Structure -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                    <h3 style="font-size: 15px; font-weight: 700;">Schema & Columns: <span style="color: var(--accent); font-family: monospace;">{{ active_table }}</span></h3>
+                    <div style="display: flex; gap: 8px;">
+                        <button onclick="switchTab('browse')" class="btn btn-primary" style="font-size: 12px; padding: 5px 12px;">🔍 Browse Data</button>
+                        <button onclick="truncateActiveTable()" class="btn btn-secondary" style="font-size: 12px; padding: 5px 12px; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);">🧹 Truncate</button>
+                        <button onclick="dropActiveTable()" class="btn btn-danger" style="font-size: 12px; padding: 5px 12px;">🗑️ Drop Table</button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table" style="font-size: 13px;">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Column Name</th>
+                                <th>Type</th>
+                                <th>Collation</th>
+                                <th>Null</th>
+                                <th>Key</th>
+                                <th>Default</th>
+                                <th>Extra</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for col in schema %}
+                            <tr>
+                                <td style="color: var(--text-muted); font-size: 11px;">{{ loop.index }}</td>
+                                <td><strong style="color: #38bdf8; font-family: monospace;">{{ col.name }}</strong></td>
+                                <td><code style="color: #f1f5f9;">{{ col.type }}</code></td>
+                                <td style="color: var(--text-muted); font-size: 12px;">{{ col.collation or '-' }}</td>
+                                <td>
+                                    {% if col.nullable == 'YES' %}
+                                    <span class="badge badge-success">YES</span>
+                                    {% else %}
+                                    <span class="badge badge-gray">NO</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    {% if col.key == 'PRI' %}
+                                    <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-weight: 700;">PRIMARY</span>
+                                    {% elif col.key == 'UNI' %}
+                                    <span class="badge badge-info">UNIQUE</span>
+                                    {% elif col.key == 'MUL' %}
+                                    <span class="badge badge-gray">INDEX</span>
+                                    {% else %}
+                                    <span style="color: var(--text-muted);">-</span>
+                                    {% endif %}
+                                </td>
+                                <td><code style="color: var(--text-secondary);">{{ col.default }}</code></td>
+                                <td><span style="color: #a78bfa; font-size: 12px;">{{ col.extra or '-' }}</span></td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                                    No columns found for this table.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% else %}
+            <!-- All Database Tables Overview (phpMyAdmin Home View) -->
+            <div class="card" style="margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                    <h3 style="font-size: 15px; font-weight: 700;">Database Tables Overview ({{ tables|length }})</h3>
+                    <button onclick="openModal('createTableModal')" class="btn btn-primary" style="font-size: 12px; padding: 6px 14px;">+ Create New Table</button>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table" style="font-size: 13px;">
+                        <thead>
+                            <tr>
+                                <th>Table Name</th>
+                                <th>Actions</th>
+                                <th>Engine</th>
+                                <th>Rows</th>
+                                <th>Data Size</th>
+                                <th>Index Size</th>
+                                <th>Total Size</th>
+                                <th>Collation</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for t in tables %}
+                            <tr>
+                                <td>
+                                    <a href="javascript:void(0)" onclick="selectTable('{{ t.name }}')" style="color: #38bdf8; font-weight: 600; font-family: monospace; text-decoration: none;">
+                                        📄 {{ t.name }}
+                                    </a>
+                                </td>
+                                <td>
+                                    <div style="display: inline-flex; gap: 4px;">
+                                        <button onclick="browseTable('{{ t.name }}')" class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px;" title="Browse Rows">🔍 Browse</button>
+                                        <button onclick="selectTable('{{ t.name }}')" class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px;" title="Structure">📋 Structure</button>
+                                        <button onclick="truncateTableDirect('{{ t.name }}')" class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f59e0b;" title="Empty table">🧹</button>
+                                        <button onclick="dropTableDirect('{{ t.name }}')" class="btn btn-danger" style="padding: 2px 6px; font-size: 11px;" title="Drop table">🗑️</button>
+                                    </div>
+                                </td>
+                                <td><span class="badge badge-gray">{{ t.engine }}</span></td>
+                                <td><strong>{{ t.rows }}</strong></td>
+                                <td style="color: var(--text-muted);">{{ t.data_size }}</td>
+                                <td style="color: var(--text-muted);">{{ t.index_size }}</td>
+                                <td><strong style="color: var(--accent);">{{ t.total_size }}</strong></td>
+                                <td style="color: var(--text-muted); font-size: 12px;">{{ t.collation }}</td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                                    <div style="font-size: 32px; margin-bottom: 8px;">📭</div>
+                                    <div>No tables in this database yet.</div>
+                                    <div style="font-size: 12px; margin-top: 6px;">Click <strong>+ Create New Table</strong> or import an existing .sql dump.</div>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- TAB 2: BROWSE DATA -->
+        <div id="tabContent-browse" class="pma-tab-content" style="display: none;">
+            <div class="card" style="margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 14px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <h3 style="font-size: 15px; font-weight: 700;">Browse Data: <span id="browseTableName" style="color: var(--accent); font-family: monospace;">{{ active_table or 'Select a table' }}</span></h3>
+                        <span id="browseDurationBadge" class="badge badge-gray" style="font-size: 11px;">Query took {{ data.duration or '0.00' }}s</span>
+                    </div>
+
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        <span id="browsePageInfo" style="font-size: 12px; color: var(--text-muted);">
+                            Showing rows <strong id="browseRowRange">1 - {{ data.rows|length }}</strong> ({{ data.total_rows }} total)
+                        </span>
+                        <button onclick="prevDataPage()" id="btnPrevPage" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" disabled>◀ Prev</button>
+                        <button onclick="nextDataPage()" id="btnNextPage" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" {% if data.total_pages <= 1 %}disabled{% endif %}>Next ▶</button>
+                    </div>
+                </div>
+
+                <!-- Table Data Grid -->
+                <div class="table-responsive" style="max-height: 550px; overflow: auto; border: 1px solid var(--border); border-radius: 6px;">
+                    <table class="table" id="browseTableData" style="font-size: 12px; font-family: monospace; margin-bottom: 0;">
+                        <thead style="position: sticky; top: 0; background: #0f172a; z-index: 2;">
+                            <tr id="browseTableHeaders">
+                                <th style="width: 40px; text-align: center;">#</th>
+                                {% for col in data.columns %}
+                                <th>{{ col }}</th>
+                                {% endfor %}
+                            </tr>
+                        </thead>
+                        <tbody id="browseTableRows">
+                            {% for row in data.rows %}
+                            <tr>
+                                <td style="color: var(--text-muted); text-align: center;">{{ loop.index }}</td>
+                                {% for cell in row %}
+                                <td>
+                                    {% if cell == 'NULL' %}
+                                    <span style="color: var(--text-muted); font-style: italic;">NULL</span>
+                                    {% else %}
+                                    {{ cell }}
+                                    {% endif %}
+                                </td>
+                                {% endfor %}
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="20" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                                    {% if active_table %}
+                                    Table is empty (0 rows).
+                                    {% else %}
+                                    Please select a table from the left sidebar to view its data.
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 3: SQL QUERY CONSOLE -->
+        <div id="tabContent-sql" class="pma-tab-content" style="display: none;">
+            <div class="card" style="margin-bottom: 20px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                    <h3 style="font-size: 15px; font-weight: 700;">SQL Query Console ({{ db_name }})</h3>
+                    <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                        <button onclick="insertSqlSnippet('SELECT * FROM `{{ active_table or 'table_name' }}` LIMIT 50;')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">SELECT *</button>
+                        <button onclick="insertSqlSnippet('SHOW TABLES;')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">SHOW TABLES</button>
+                        <button onclick="insertSqlSnippet('SHOW TABLE STATUS;')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">TABLE STATUS</button>
+                        <button onclick="insertSqlSnippet('CHECK TABLE `{{ active_table or 'table_name' }}`;')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">CHECK TABLE</button>
+                        <button onclick="clearSqlQuery()" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;">Clear</button>
+                    </div>
+                </div>
+
+                <div style="position: relative; margin-bottom: 12px;">
+                    <textarea id="sqlQueryInput" class="form-control" rows="6" style="font-family: monospace; font-size: 13px; line-height: 1.5; background: #0b1120; color: #38bdf8;" placeholder="Enter SQL query here (e.g. SELECT * FROM users LIMIT 10;)">SELECT * FROM `{{ active_table or tables[0].name if tables else 'table_name' }}` LIMIT 50;</textarea>
+                </div>
+
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 12px; color: var(--text-muted);">Tip: Press <strong>Ctrl + Enter</strong> to execute quickly.</span>
+                    <button onclick="runConsoleQuery()" class="btn btn-primary" id="btnRunQuery" style="font-size: 13px; padding: 8px 20px;">
+                        🚀 Run SQL Query
+                    </button>
+                </div>
+
+                <!-- Query Result Output -->
+                <div id="queryResultWrapper" style="margin-top: 16px; display: none;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <span id="queryResultStatus" style="font-size: 12px; font-weight: 600; color: var(--success);">Query OK</span>
+                        <span id="queryDurationBadge" class="badge badge-gray" style="font-size: 11px;">0.00s</span>
+                    </div>
+                    <div class="table-responsive" style="max-height: 400px; overflow: auto; border: 1px solid var(--border); border-radius: 6px;">
+                        <table class="table" id="queryResultTable" style="font-size: 12px; font-family: monospace; margin-bottom: 0;">
+                            <thead id="queryResultHead"></thead>
+                            <tbody id="queryResultBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 4: OPERATIONS -->
+        <div id="tabContent-operations" class="pma-tab-content" style="display: none;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; margin-bottom: 20px;">
+                <!-- Table Operations (if active table) -->
+                {% if active_table %}
+                <div class="card">
+                    <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: #38bdf8;">Table Operations: {{ active_table }}</h4>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">Perform maintenance operations on the active table.</p>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button onclick="optimizeActiveTable()" class="btn btn-secondary" style="font-size: 12px; text-align: left; padding: 8px 12px;">
+                            ⚡ Optimize Table (Defragment & reclaim disk space)
+                        </button>
+                        <button onclick="truncateActiveTable()" class="btn btn-secondary" style="font-size: 12px; text-align: left; padding: 8px 12px; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);">
+                            🧹 Empty / Truncate Table (Delete all records)
+                        </button>
+                        <button onclick="dropActiveTable()" class="btn btn-danger" style="font-size: 12px; text-align: left; padding: 8px 12px;">
+                            🗑️ Drop Table (Delete table & schema permanently)
+                        </button>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- Database Maintenance -->
+                <div class="card">
+                    <h4 style="font-size: 14px; font-weight: 700; margin-bottom: 12px; color: var(--accent);">Database Maintenance</h4>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">Optimize all database tables and check data integrity.</p>
+                    <div style="display: flex; flex-direction: column; gap: 8px;">
+                        <button onclick="runConsoleDirect('OPTIMIZE TABLE ' + '{{ tables|map(attribute='name')|join(', ') }}' + ';')" class="btn btn-secondary" style="font-size: 12px; text-align: left; padding: 8px 12px;" {% if not tables %}disabled{% endif %}>
+                            ⚡ Optimize All Tables in Database
+                        </button>
+                        <button onclick="runConsoleDirect('CHECK TABLE ' + '{{ tables|map(attribute='name')|join(', ') }}' + ';')" class="btn btn-secondary" style="font-size: 12px; text-align: left; padding: 8px 12px;" {% if not tables %}disabled{% endif %}>
+                            🔍 Check & Verify Table Integrity
+                        </button>
+                        <a href="/databases/{{ db_name }}/export" class="btn btn-primary" style="font-size: 12px; text-align: center; padding: 8px 12px; text-decoration: none;">
+                            💾 Download Complete SQL Dump
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Create Table -->
+<div id="createTableModal" class="modal-backdrop">
+    <div class="modal-box" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>Create New Table in <span style="color: var(--accent);">{{ db_name }}</span></h3>
+            <button onclick="closeModal('createTableModal')" class="modal-close">&times;</button>
+        </div>
+        <form onsubmit="handleCreateTable(event)">
+            <div class="form-group">
+                <label>Table Name</label>
+                <input type="text" id="newTableName" class="form-control" placeholder="e.g. users, products, orders" required pattern="^[a-zA-Z0-9_]+$">
+            </div>
+            <div class="form-group">
+                <label>Storage Engine</label>
+                <select id="newTableEngine" class="form-control">
+                    <option value="InnoDB">InnoDB (Recommended)</option>
+                    <option value="MyISAM">MyISAM</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Primary Key Column</label>
+                <input type="text" id="newTablePk" class="form-control" value="id INT AUTO_INCREMENT PRIMARY KEY" required>
+            </div>
+            <div class="modal-footer" style="padding: 0; margin-top: 20px;">
+                <button type="button" onclick="closeModal('createTableModal')" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="btnCreateTable">Create Table</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Modal: Import SQL File -->
+<div id="importSqlModal" class="modal-backdrop">
+    <div class="modal-box" style="max-width: 500px;">
+        <div class="modal-header">
+            <h3>Import SQL File into <span style="color: var(--accent);">{{ db_name }}</span></h3>
+            <button onclick="closeModal('importSqlModal')" class="modal-close">&times;</button>
+        </div>
+        <form onsubmit="handleImportSql(event)">
+            <div class="form-group">
+                <label>Select .sql Dump File</label>
+                <input type="file" id="importSqlFileInput" class="form-control" accept=".sql" required>
+                <small style="color: var(--text-muted); font-size: 11px; margin-top: 4px; display: block;">Supports standard mysqldump, phpMyAdmin, and Adminer export files.</small>
+            </div>
+            <div class="modal-footer" style="padding: 0; margin-top: 20px;">
+                <button type="button" onclick="closeModal('importSqlModal')" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary" id="btnImportSqlSubmit">Import SQL</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.db-table-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+.db-table-item.active {
+    background: rgba(14, 165, 233, 0.15);
+    color: var(--accent);
+    border-left: 3px solid var(--accent);
+}
+.pma-tab-btn {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.pma-tab-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-primary);
+}
+.pma-tab-btn.active {
+    background: rgba(14, 165, 233, 0.15);
+    color: var(--accent);
+}
+</style>
+
+<script>
+const DB_NAME = "{{ db_name }}";
+let activeTable = "{{ active_table or '' }}";
+let currentPage = 1;
+const pageSize = 25;
+let totalPages = {{ data.total_pages or 1 }};
+
+function selectTable(tableName) {
+    window.location.href = `/databases/${DB_NAME}/manage?table=${tableName}&tab=structure`;
+}
+
+function browseTable(tableName) {
+    window.location.href = `/databases/${DB_NAME}/manage?table=${tableName}&tab=browse`;
+}
+
+function switchTab(tabName) {
+    document.querySelectorAll('.pma-tab-btn').forEach(btn => btn.classList.remove('active'));
+    document.querySelectorAll('.pma-tab-content').forEach(c => c.style.display = 'none');
+
+    const btn = document.getElementById(`tabBtn-${tabName}`);
+    const content = document.getElementById(`tabContent-${tabName}`);
+    if (btn) btn.classList.add('active');
+    if (content) content.style.display = 'block';
+
+    if (tabName === 'browse' && activeTable) {
+        loadTableData(activeTable, 1);
+    }
+}
+
+function filterTables() {
+    const q = document.getElementById('tableFilterInput').value.toLowerCase();
+    const items = document.querySelectorAll('.db-table-item');
+    let visible = 0;
+    items.forEach(el => {
+        const name = el.getAttribute('data-name').toLowerCase();
+        if (name.includes(q)) {
+            el.style.display = 'flex';
+            visible++;
+        } else {
+            el.style.display = 'none';
+        }
+    });
+    document.getElementById('tableCountDisplay').innerText = visible;
+}
+
+async function loadTableData(tableName, page = 1) {
+    currentPage = page;
+    try {
+        const res = await fetch(`/databases/api/${DB_NAME}/table/${tableName}/data?page=${page}&page_size=${pageSize}`);
+        const data = await res.json();
+        if (!data.success) return;
+
+        totalPages = data.total_pages || 1;
+        document.getElementById('browseTableName').innerText = tableName;
+        document.getElementById('browseDurationBadge').innerText = `Query took ${data.duration || '0.00'}s`;
+        
+        const startRow = data.total_rows === 0 ? 0 : (page - 1) * pageSize + 1;
+        const endRow = Math.min(page * pageSize, data.total_rows);
+        document.getElementById('browseRowRange').innerText = `${startRow} - ${endRow}`;
+        document.getElementById('browsePageInfo').innerHTML = `Showing rows <strong id="browseRowRange">${startRow} - ${endRow}</strong> (${data.total_rows} total)`;
+
+        document.getElementById('btnPrevPage').disabled = (page <= 1);
+        document.getElementById('btnNextPage').disabled = (page >= totalPages);
+
+        // Render headers
+        const headRow = document.getElementById('browseTableHeaders');
+        headRow.innerHTML = '<th style="width: 40px; text-align: center;">#</th>';
+        data.columns.forEach(col => {
+            const th = document.createElement('th');
+            th.innerText = col;
+            headRow.appendChild(th);
+        });
+
+        // Render rows
+        const tbody = document.getElementById('browseTableRows');
+        tbody.innerHTML = '';
+        if (data.rows.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="20" style="text-align: center; color: var(--text-muted); padding: 40px;">Table is empty (0 rows).</td></tr>';
+            return;
+        }
+
+        data.rows.forEach((r, idx) => {
+            const tr = document.createElement('tr');
+            let rowHtml = `<td style="color: var(--text-muted); text-align: center;">${startRow + idx}</td>`;
+            r.forEach(cell => {
+                if (cell === 'NULL') {
+                    rowHtml += `<td style="color: var(--text-muted); font-style: italic;">NULL</td>`;
+                } else {
+                    const safe = String(cell).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                    rowHtml += `<td>${safe}</td>`;
+                }
+            });
+            tr.innerHTML = rowHtml;
+            tbody.appendChild(tr);
+        });
+    } catch (e) {
+        showToast("Error loading table data: " + e, "danger");
+    }
+}
+
+function prevDataPage() {
+    if (currentPage > 1 && activeTable) {
+        loadTableData(activeTable, currentPage - 1);
+    }
+}
+
+function nextDataPage() {
+    if (currentPage < totalPages && activeTable) {
+        loadTableData(activeTable, currentPage + 1);
+    }
+}
+
+// SQL Query Execution
+async function runConsoleQuery() {
+    const q = document.getElementById('sqlQueryInput').value.trim();
+    if (!q) return;
+
+    const btn = document.getElementById('btnRunQuery');
+    btn.disabled = true;
+    btn.innerText = "Executing...";
+
+    try {
+        const formData = new FormData();
+        formData.append("query", q);
+
+        const res = await fetch(`/databases/api/${DB_NAME}/execute`, {
+            method: "POST",
+            body: formData
+        });
+        const data = await res.json();
+        btn.disabled = false;
+        btn.innerText = "🚀 Run SQL Query";
+
+        const wrapper = document.getElementById('queryResultWrapper');
+        wrapper.style.display = 'block';
+
+        if (!data.success) {
+            document.getElementById('queryResultStatus').innerText = "Query Error";
+            document.getElementById('queryResultStatus').style.color = "var(--danger)";
+            document.getElementById('queryDurationBadge').innerText = "Failed";
+            document.getElementById('queryResultHead').innerHTML = '';
+            document.getElementById('queryResultBody').innerHTML = `<tr><td style="color: #f87171; padding: 16px;">${data.error}</td></tr>`;
+            return;
+        }
+
+        document.getElementById('queryResultStatus').innerText = data.type === 'action' ? data.message : `Query OK (${data.count} rows returned)`;
+        document.getElementById('queryResultStatus').style.color = "var(--success)";
+        document.getElementById('queryDurationBadge').innerText = `${data.duration || '0.00'}s`;
+
+        const head = document.getElementById('queryResultHead');
+        const body = document.getElementById('queryResultBody');
+        head.innerHTML = '';
+        body.innerHTML = '';
+
+        if (data.type === 'action') {
+            body.innerHTML = `<tr><td style="color: var(--success); padding: 16px;">${data.message}</td></tr>`;
+            return;
+        }
+
+        let headerRow = '<tr>';
+        data.columns.forEach(c => headerRow += `<th>${c}</th>`);
+        headerRow += '</tr>';
+        head.innerHTML = headerRow;
+
+        data.rows.forEach(r => {
+            let rowHtml = '<tr>';
+            r.forEach(cell => {
+                const safe = String(cell).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                rowHtml += `<td>${safe}</td>`;
+            });
+            rowHtml += '</tr>';
+            body.innerHTML += rowHtml;
+        });
+
+    } catch (e) {
+        btn.disabled = false;
+        btn.innerText = "🚀 Run SQL Query";
+        showToast("Query error: " + e, "danger");
+    }
+}
+
+function runConsoleDirect(sql) {
+    document.getElementById('sqlQueryInput').value = sql;
+    switchTab('sql');
+    runConsoleQuery();
+}
+
+function insertSqlSnippet(snippet) {
+    document.getElementById('sqlQueryInput').value = snippet;
+}
+
+function clearSqlQuery() {
+    document.getElementById('sqlQueryInput').value = '';
+}
+
+// Table Operations
+async function truncateActiveTable() {
+    if (!activeTable) return;
+    if (!confirm(`Are you sure you want to TRUNCATE table '${activeTable}'? All records will be wiped out!`)) return;
+
+    try {
+        const res = await fetch(`/databases/api/${DB_NAME}/table/${activeTable}/truncate`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Table '${activeTable}' truncated successfully!`, "success");
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showToast(data.message || "Truncate failed", "danger");
+        }
+    } catch (e) {
+        showToast("Error: " + e, "danger");
+    }
+}
+
+async function dropActiveTable() {
+    if (!activeTable) return;
+    if (!confirm(`Are you sure you want to DROP table '${activeTable}'? The table and schema will be PERMANENTLY deleted!`)) return;
+
+    try {
+        const res = await fetch(`/databases/api/${DB_NAME}/table/${activeTable}/drop`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Table '${activeTable}' dropped!`, "success");
+            setTimeout(() => window.location.href = `/databases/${DB_NAME}/manage`, 800);
+        } else {
+            showToast(data.message || "Drop failed", "danger");
+        }
+    } catch (e) {
+        showToast("Error: " + e, "danger");
+    }
+}
+
+async function optimizeActiveTable() {
+    if (!activeTable) return;
+    try {
+        const res = await fetch(`/databases/api/${DB_NAME}/table/${activeTable}/optimize`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Table '${activeTable}' optimized!`, "success");
+        } else {
+            showToast(data.message || "Optimize failed", "danger");
+        }
+    } catch (e) {
+        showToast("Error: " + e, "danger");
+    }
+}
+
+async function truncateTableDirect(tName) {
+    if (!confirm(`Are you sure you want to TRUNCATE '${tName}'?`)) return;
+    try {
+        const res = await fetch(`/databases/api/${DB_NAME}/table/${tName}/truncate`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Table '${tName}' truncated!`, "success");
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showToast(data.message || "Truncate failed", "danger");
+        }
+    } catch (e) {
+        showToast("Error: " + e, "danger");
+    }
+}
+
+async function dropTableDirect(tName) {
+    if (!confirm(`Are you sure you want to DROP table '${tName}' permanently?`)) return;
+    try {
+        const res = await fetch(`/databases/api/${DB_NAME}/table/${tName}/drop`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Table '${tName}' dropped!`, "success");
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showToast(data.message || "Drop failed", "danger");
+        }
+    } catch (e) {
+        showToast("Error: " + e, "danger");
+    }
+}
+
+// Create Table
+async function handleCreateTable(e) {
+    e.preventDefault();
+    const tName = document.getElementById('newTableName').value.trim();
+    const engine = document.getElementById('newTableEngine').value;
+    const pk = document.getElementById('newTablePk').value.trim();
+
+    const sql = `CREATE TABLE \`${tName}\` (\n  ${pk}\n) ENGINE=${engine} DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`;
+
+    const btn = document.getElementById('btnCreateTable');
+    btn.disabled = true;
+
+    try {
+        const formData = new FormData();
+        formData.append("query", sql);
+
+        const res = await fetch(`/databases/api/${DB_NAME}/execute`, {
+            method: "POST",
+            body: formData
+        });
+        const data = await res.json();
+        btn.disabled = false;
+
+        if (data.success) {
+            showToast(`Table '${tName}' created!`, "success");
+            closeModal('createTableModal');
+            setTimeout(() => selectTable(tName), 800);
+        } else {
+            showToast(data.error || "Failed to create table", "danger");
+        }
+    } catch (e) {
+        btn.disabled = false;
+        showToast("Error: " + e, "danger");
+    }
+}
+
+// Import SQL
+async function handleImportSql(e) {
+    e.preventDefault();
+    const fileInput = document.getElementById('importSqlFileInput');
+    if (!fileInput.files.length) return;
+
+    const btn = document.getElementById('btnImportSqlSubmit');
+    btn.disabled = true;
+    btn.innerText = "Importing SQL...";
+
+    const formData = new FormData();
+    formData.append("sql_file", fileInput.files[0]);
+
+    // We can use the existing import endpoint by finding db_id or query console
+    // Read text file and execute
+    const file = fileInput.files[0];
+    const reader = new FileReader();
+    reader.onload = async function(evt) {
+        const sqlText = evt.target.result;
+        try {
+            const fd = new FormData();
+            fd.append("query", sqlText);
+            const res = await fetch(`/databases/api/${DB_NAME}/execute`, { method: "POST", body: fd });
+            const data = await res.json();
+            btn.disabled = false;
+            btn.innerText = "Import SQL";
+            if (data.success) {
+                showToast("SQL file imported successfully!", "success");
+                closeModal('importSqlModal');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showToast("Import error: " + (data.error || data.message), "danger");
+            }
+        } catch (err) {
+            btn.disabled = false;
+            btn.innerText = "Import SQL";
+            showToast("Import failed: " + err, "danger");
+        }
+    };
+    reader.readAsText(file);
+}
+
+// Key shortcuts
+document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        const sqlInput = document.getElementById('sqlQueryInput');
+        if (sqlInput && document.activeElement === sqlInput) {
+            runConsoleQuery();
+        }
+    }
+});
+
+// Init Tab
+document.addEventListener('DOMContentLoaded', () => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const tab = urlParams.get('tab') || 'structure';
+    switchTab(tab);
+});
+</script>
+{% endblock %}
