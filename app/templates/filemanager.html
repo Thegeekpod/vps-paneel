@@ -1,44 +1,131 @@
 {% extends "base.html" %}
 
-{% block title %}File Manager - VPS Control Panel{% endblock %}
-{% block page_title %}File Manager{% endblock %}
+{% block title %}Advanced File Manager - VPS Control Panel{% endblock %}
+{% block page_title %}Advanced File Manager{% endblock %}
+
+{% block head %}
+<!-- Ace Code Editor -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ace.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.32.7/ext-modelist.min.js"></script>
+<style>
+    #aceEditorContainer {
+        width: 100%;
+        height: 540px;
+        font-size: 14px;
+        line-height: 1.6;
+    }
+    .breadcrumb-item {
+        color: var(--accent);
+        text-decoration: none;
+        font-weight: 600;
+        transition: color 0.15s;
+    }
+    .breadcrumb-item:hover {
+        color: #fff;
+        text-decoration: underline;
+    }
+    .batch-bar {
+        display: none;
+        background: rgba(56, 189, 248, 0.12);
+        border: 1px solid rgba(56, 189, 248, 0.3);
+        border-radius: 8px;
+        padding: 10px 18px;
+        margin-bottom: 16px;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+    }
+    .search-box {
+        position: relative;
+        max-width: 260px;
+        width: 100%;
+    }
+    .search-box input {
+        padding-left: 32px;
+        font-size: 12px;
+        height: 36px;
+    }
+    .search-icon {
+        position: absolute;
+        left: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 13px;
+        color: var(--text-muted);
+        pointer-events: none;
+    }
+    .perm-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin: 16px 0;
+        background: #0f172a;
+        padding: 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+    }
+    .perm-col label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        margin-bottom: 6px;
+        cursor: pointer;
+    }
+    .perm-title {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--accent);
+        margin-bottom: 8px;
+        text-transform: uppercase;
+    }
+</style>
+{% endblock %}
 
 {% block content %}
-<!-- Website Selector & Action Toolbar -->
-<div class="card" style="margin-bottom: 20px;">
-    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;">
-        <!-- Left: Website Dropdown -->
-        <div style="display: flex; align-items: center; gap: 12px;">
-            <span style="font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Website:</span>
-            <select onchange="location.href='/file-manager?site_id=' + this.value" style="width: auto; min-width: 200px;">
+<!-- Top Toolbar -->
+<div class="card" style="margin-bottom: 18px;">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px;">
+        <!-- Left: Website Selector -->
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <span style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Website:</span>
+            <select onchange="location.href='/file-manager?site_id=' + this.value" style="width: auto; min-width: 200px; height: 36px; font-size: 13px; font-weight: 600;">
                 {% for site in websites %}
                 <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
                     {{ site.domain }}
                 </option>
                 {% else %}
-                <option value="">No websites hosted yet</option>
+                <option value="">No websites created yet</option>
                 {% endfor %}
             </select>
             {% if selected_site %}
-            <span class="badge badge-success">✓ Root Access (0755/0664)</span>
+            <span class="badge badge-success" title="Runs as root daemon with www-data compatibility">● Root Daemon Active</span>
             {% endif %}
         </div>
+
+        <!-- Search input -->
+        {% if selected_site %}
+        <div class="search-box">
+            <span class="search-icon">🔍</span>
+            <input type="text" id="filterInput" placeholder="Filter files..." onkeyup="filterFiles()">
+        </div>
+        {% endif %}
 
         <!-- Right: Actions -->
         {% if selected_site %}
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-            <button onclick="openModal('newFileModal')" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+            <button onclick="openModal('newFileModal')" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;">
                 <span>+</span> New File
             </button>
-            <button onclick="openModal('newFolderModal')" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+            <button onclick="openModal('newFolderModal')" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px;">
                 <span>📁</span> New Folder
             </button>
-            <button onclick="document.getElementById('uploadInput').click()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+            <button onclick="document.getElementById('multiUploadInput').click()" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px;">
                 <span>⬆️</span> Upload
             </button>
-            <input type="file" id="uploadInput" style="display: none;" onchange="handleUpload(this)">
-            <button onclick="fixPerms()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
-                <span>🛡️</span> Fix Permissions
+            <input type="file" id="multiUploadInput" style="display: none;" multiple onchange="handleMultiUpload(this.files)">
+            <button onclick="fixPerms()" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px;" title="Reset all permissions to 775/664 owned by www-data">
+                <span>🛡️</span> Repair Permissions
             </button>
         </div>
         {% endif %}
@@ -46,24 +133,65 @@
 </div>
 
 {% if selected_site %}
-<!-- Breadcrumbs Path Bar -->
-<div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-family: monospace;">
-    <a href="/file-manager?site_id={{ selected_site.id }}" style="color: var(--accent); text-decoration: none; font-weight: 600;">root</a>
-    {% if current_path %}
-    <span>/</span>
-    <span style="color: var(--text-primary);">{{ current_path }}</span>
-    {% endif %}
+<!-- Drag & Drop Overlay Zone -->
+<div id="dropZone" class="dropzone-overlay" style="margin-bottom: 18px; display: none;" onclick="document.getElementById('multiUploadInput').click()">
+    <div style="font-size: 28px; margin-bottom: 8px;">📤</div>
+    <div style="font-size: 14px; font-weight: 600; color: var(--accent);">Drag & Drop files here to upload directly to current folder</div>
+    <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Or click anywhere in this box to choose files from your computer</div>
 </div>
 
-<!-- Code Editor Box (Hidden by default, shown when editing) -->
-<div id="editorContainer" class="card" style="display: none; margin-bottom: 24px; border: 1px solid var(--accent); padding: 0; overflow: hidden;">
-    <div style="background: #0b1120; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
-        <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 14px; font-weight: 600;" id="editorFileName">file.txt</span>
+<!-- Breadcrumb Path Bar -->
+<div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border); border-radius: 10px; padding: 12px 18px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-family: monospace;">
+    <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <span style="color: var(--text-muted);">Path:</span>
+        <a href="/file-manager?site_id={{ selected_site.id }}" class="breadcrumb-item">/www/wwwroot/{{ selected_site.domain }}</a>
+        {% for b in breadcrumbs %}
+        <span style="color: var(--text-muted);">/</span>
+        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ b.path }}" class="breadcrumb-item">{{ b.name }}</a>
+        {% endfor %}
+    </div>
+    <div style="display: flex; align-items: center; gap: 10px;">
+        <button onclick="toggleDropZone()" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">
+            Toggle Dropzone
+        </button>
+        <button onclick="copyCurrentPath()" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">
+            📋 Copy Path
+        </button>
+    </div>
+</div>
+
+<!-- Batch Action Toolbar (Visible when rows selected) -->
+<div id="batchBar" class="batch-bar">
+    <div style="display: flex; align-items: center; gap: 12px;">
+        <strong id="batchCount" style="color: var(--accent); font-size: 13px;">0 items selected</strong>
+        <span style="color: var(--text-muted); font-size: 12px;">|</span>
+        <button onclick="openBatchZipModal()" class="btn btn-secondary" style="padding: 4px 12px; font-size: 12px;">
+            🗜️ Compress to ZIP
+        </button>
+        <button onclick="executeBatchDelete()" class="btn btn-danger" style="padding: 4px 12px; font-size: 12px;">
+            🗑️ Delete Selected
+        </button>
+    </div>
+    <button onclick="clearSelection()" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">
+        ✕ Clear Selection
+    </button>
+</div>
+
+<!-- Advanced Ace Code Editor Drawer/Container -->
+<div id="editorContainer" class="card" style="display: none; margin-bottom: 24px; border: 1px solid var(--accent); padding: 0; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.7);">
+    <!-- Editor Top Header -->
+    <div style="background: #0b1120; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 15px; font-weight: 700; color: #fff;" id="editorFileName">file.txt</span>
+            <span class="badge badge-purple" id="editorModeBadge">PHP</span>
             <span class="badge badge-gray">UTF-8</span>
+            <span id="editorSaveStatus" style="font-size: 12px; color: var(--text-muted); display: none;">Saving...</span>
         </div>
-        <div style="display: flex; gap: 10px;">
-            <button onclick="saveCurrentFile()" class="btn btn-success" style="font-size: 12px; padding: 6px 14px;">
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <button onclick="toggleEditorFullscreen()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;" title="Toggle Fullscreen">
+                ⛶ Fullscreen
+            </button>
+            <button onclick="saveCurrentFile()" class="btn btn-success" style="font-size: 12px; padding: 6px 16px;">
                 💾 Save Changes (Ctrl+S)
             </button>
             <button onclick="closeEditor()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
@@ -71,62 +199,125 @@
             </button>
         </div>
     </div>
-    <textarea id="codeEditorArea" style="width: 100%; height: 480px; background: #070b14; color: #f8fafc; font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 13px; line-height: 1.6; border: none; padding: 16px; resize: vertical; border-radius: 0;"></textarea>
-    <div style="background: #0b1120; padding: 8px 18px; font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between; border-top: 1px solid var(--border);">
-        <span>Hotkeys: Ctrl+S or Cmd+S to save instantly</span>
-        <span id="charCount">0 characters</span>
+    
+    <!-- Ace Container -->
+    <div id="aceEditorContainer"></div>
+
+    <!-- Editor Footer -->
+    <div style="background: #0b1120; padding: 8px 20px; font-size: 12px; color: var(--text-muted); display: flex; justify-content: space-between; border-top: 1px solid var(--border);">
+        <span>Hotkeys: <strong>Ctrl+S</strong> / <strong>Cmd+S</strong> to save instantly | <strong>Ctrl+F</strong> to search & replace</span>
+        <span id="editorCursorPos">Ln 1, Col 1</span>
     </div>
 </div>
 
-<!-- File Listing Table -->
+<!-- Main File Listing Card -->
 <div class="card" id="fileListCard">
     <div class="table-responsive">
-        <table>
+        <table id="fileTable">
             <thead>
                 <tr>
+                    <th style="width: 40px; text-align: center;">
+                        <input type="checkbox" id="selectAllCheckbox" onchange="toggleSelectAll(this)" style="cursor: pointer; width: 16px; height: 16px;">
+                    </th>
                     <th>Name</th>
-                    <th>Size</th>
-                    <th>Permissions</th>
-                    <th>Actions</th>
+                    <th style="width: 110px;">Size</th>
+                    <th style="width: 100px;">Permissions</th>
+                    <th style="width: 160px;">Modified</th>
+                    <th style="width: 200px; text-align: right;">Actions</th>
                 </tr>
             </thead>
             <tbody>
+                <!-- Parent Directory link -->
                 {% if current_path %}
                 <tr>
-                    <td colspan="4">
-                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ '/'.join(current_path.split('/')[:-1]) }}" style="color: var(--accent); text-decoration: none; font-weight: 600;">
-                            📁 .. (Parent Directory)
+                    <td></td>
+                    <td colspan="5">
+                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ '/'.join(current_path.split('/')[:-1]) }}" style="color: var(--accent); text-decoration: none; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;">
+                            <span class="fm-icon fm-icon-dir">📁</span> .. (Up to Parent Directory)
                         </a>
                     </td>
                 </tr>
                 {% endif %}
 
+                <!-- File & Directory rows -->
                 {% for item in items %}
-                <tr>
+                <tr class="file-row" id="row-{{ loop.index }}" data-name="{{ item.name|lower }}">
+                    <td style="text-align: center;">
+                        <input type="checkbox" class="file-check" value="{{ item.rel_path }}" onchange="handleRowSelect(this, 'row-{{ loop.index }}')" style="cursor: pointer; width: 16px; height: 16px;">
+                    </td>
                     <td>
                         {% if item.is_dir %}
-                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ item.rel_path }}" style="color: #38bdf8; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
-                            📁 {{ item.name }}
+                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ item.rel_path }}" style="color: #38bdf8; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center;">
+                            <span class="fm-icon fm-icon-dir">📁</span> {{ item.name }}
                         </a>
                         {% else %}
-                        <span style="color: #f8fafc; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;">
-                            📄 {{ item.name }}
-                        </span>
+                            <span style="display: inline-flex; align-items: center;">
+                                {% if item.ext == 'php' %}
+                                    <span class="fm-icon fm-icon-php">🐘</span>
+                                {% elif item.ext in ['html', 'htm'] %}
+                                    <span class="fm-icon fm-icon-html">🌐</span>
+                                {% elif item.ext in ['js', 'ts'] %}
+                                    <span class="fm-icon fm-icon-js">⚡</span>
+                                {% elif item.ext in ['css', 'scss'] %}
+                                    <span class="fm-icon fm-icon-css">🎨</span>
+                                {% elif item.ext in ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'ico'] %}
+                                    <span class="fm-icon fm-icon-img">🖼️</span>
+                                {% elif item.ext == 'zip' %}
+                                    <span class="fm-icon fm-icon-zip">🗜️</span>
+                                {% else %}
+                                    <span class="fm-icon fm-icon-txt">📄</span>
+                                {% endif %}
+
+                                {% if item.is_editable %}
+                                <a href="javascript:void(0)" onclick="editFile('{{ item.rel_path }}', '{{ item.name }}', '{{ item.ext }}')" style="color: #f8fafc; text-decoration: none; font-weight: 500;">
+                                    {{ item.name }}
+                                </a>
+                                {% elif item.is_image %}
+                                <a href="javascript:void(0)" onclick="previewImage('{{ item.rel_path }}', '{{ item.name }}')" style="color: #34d399; text-decoration: none; font-weight: 500;">
+                                    {{ item.name }}
+                                </a>
+                                {% else %}
+                                <span style="color: #f8fafc; font-weight: 500;">{{ item.name }}</span>
+                                {% endif %}
+                            </span>
                         {% endif %}
                     </td>
                     <td>{{ item.size }}</td>
-                    <td><code>{{ item.permissions }}</code></td>
+                    <td>
+                        <a href="javascript:void(0)" onclick="openChmodModal('{{ item.rel_path }}', '{{ item.permissions }}')" style="text-decoration: none;" title="Click to change permissions">
+                            <span class="badge badge-gray" style="cursor: pointer; border: 1px solid var(--border);">{{ item.permissions }}</span>
+                        </a>
+                    </td>
+                    <td style="color: var(--text-muted); font-size: 12px;">{{ item.modified }}</td>
                     <td style="text-align: right;">
-                        <div style="display: inline-flex; gap: 6px;">
-                            {% if not item.is_dir %}
-                            <button onclick="editFile('{{ item.rel_path }}', '{{ item.name }}')" class="btn btn-primary" style="padding: 3px 8px; font-size: 11px;">
+                        <div style="display: inline-flex; gap: 4px;">
+                            {% if item.is_editable %}
+                            <button onclick="editFile('{{ item.rel_path }}', '{{ item.name }}', '{{ item.ext }}')" class="btn btn-primary" style="padding: 4px 8px; font-size: 11px;" title="Edit Code">
                                 ✏️ Edit
                             </button>
-                            <a href="/file-manager/download?site_id={{ selected_site.id }}&path={{ item.rel_path }}" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;">
+                            {% endif %}
+
+                            {% if item.is_archive %}
+                            <button onclick="openUnzipModal('{{ item.rel_path }}')" class="btn btn-success" style="padding: 4px 8px; font-size: 11px;" title="Unzip/Extract">
+                                🗜️ Unzip
+                            </button>
+                            {% endif %}
+
+                            {% if not item.is_dir %}
+                            <a href="/file-manager/download?site_id={{ selected_site.id }}&path={{ item.rel_path }}" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Download file">
                                 ⬇️
                             </a>
                             {% endif %}
-                            <button onclick="deleteItem('{{ item.rel_path }}')" class="btn btn-danger" style="padding: 3px 8px; font-size: 11px;">
+
+                            <button onclick="openRenameModal('{{ item.rel_path }}', '{{ item.name }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Rename">
+                                🏷️
+                            </button>
+
+                            <button onclick="openChmodModal('{{ item.rel_path }}', '{{ item.permissions }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Change Permissions">
+                                🛡️
+                            </button>
+
+                            <button onclick="deleteSingleItem('{{ item.rel_path }}')" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" title="Delete">
                                 🗑️
                             </button>
                         </div>
@@ -134,8 +325,10 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px;">
-                        This directory is empty.
+                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                        <div style="font-size: 32px; margin-bottom: 8px;">📂</div>
+                        <div>This directory is currently empty.</div>
+                        <div style="font-size: 12px; margin-top: 6px;">Use <strong>+ New File</strong> or drag and drop files here to upload.</div>
                     </td>
                 </tr>
                 {% endfor %}
@@ -147,10 +340,10 @@
 <!-- Modal: New File -->
 <div id="newFileModal" class="modal-overlay">
     <div class="modal-box">
-        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Create New File</h3>
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Create New File</h3>
         <div style="margin-bottom: 16px;">
-            <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">File Name</label>
-            <input type="text" id="newFileNameInput" placeholder="index.html">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">File Name (e.g. index.php, style.css)</label>
+            <input type="text" id="newFileNameInput" placeholder="index.php">
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 10px;">
             <button onclick="closeModal('newFileModal')" class="btn btn-secondary">Cancel</button>
@@ -162,9 +355,9 @@
 <!-- Modal: New Folder -->
 <div id="newFolderModal" class="modal-overlay">
     <div class="modal-box">
-        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Create New Folder</h3>
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Create New Folder</h3>
         <div style="margin-bottom: 16px;">
-            <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Folder Name</label>
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Folder Name</label>
             <input type="text" id="newFolderNameInput" placeholder="assets">
         </div>
         <div style="display: flex; justify-content: flex-end; gap: 10px;">
@@ -173,159 +366,583 @@
         </div>
     </div>
 </div>
-{% endif %}
-{% endblock %}
 
-{% block scripts %}
+<!-- Modal: Rename -->
+<div id="renameModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Rename Item</h3>
+        <input type="hidden" id="renameOldPath">
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">New Name</label>
+            <input type="text" id="renameNewNameInput">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('renameModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitRename()" class="btn btn-primary">Rename</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Chmod Permissions -->
+<div id="chmodModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 520px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Change Permissions</h3>
+        <input type="hidden" id="chmodPath">
+        
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 14px;">
+            <label style="font-size: 13px; font-weight: 600;">Octal Permission:</label>
+            <input type="text" id="chmodOctalInput" maxlength="4" style="width: 100px; text-align: center; font-size: 15px; font-family: monospace; font-weight: 700;" onkeyup="syncPermCheckboxes()">
+        </div>
+
+        <div class="perm-grid">
+            <div class="perm-col">
+                <div class="perm-title">Owner</div>
+                <label><input type="checkbox" id="p_u_r" onchange="syncOctalFromCheckboxes()"> Read (4)</label>
+                <label><input type="checkbox" id="p_u_w" onchange="syncOctalFromCheckboxes()"> Write (2)</label>
+                <label><input type="checkbox" id="p_u_x" onchange="syncOctalFromCheckboxes()"> Execute (1)</label>
+            </div>
+            <div class="perm-col">
+                <div class="perm-title">Group</div>
+                <label><input type="checkbox" id="p_g_r" onchange="syncOctalFromCheckboxes()"> Read (4)</label>
+                <label><input type="checkbox" id="p_g_w" onchange="syncOctalFromCheckboxes()"> Write (2)</label>
+                <label><input type="checkbox" id="p_g_x" onchange="syncOctalFromCheckboxes()"> Execute (1)</label>
+            </div>
+            <div class="perm-col">
+                <div class="perm-title">Public</div>
+                <label><input type="checkbox" id="p_o_r" onchange="syncOctalFromCheckboxes()"> Read (4)</label>
+                <label><input type="checkbox" id="p_o_w" onchange="syncOctalFromCheckboxes()"> Write (2)</label>
+                <label><input type="checkbox" id="p_o_x" onchange="syncOctalFromCheckboxes()"> Execute (1)</label>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 18px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer;">
+                <input type="checkbox" id="chmodRecursive" style="width: 16px; height: 16px;"> Apply recursively to all sub-items
+            </label>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('chmodModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitChmod()" class="btn btn-primary">Save Permissions</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Compress (Zip) -->
+<div id="zipModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Compress to ZIP Archive</h3>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Archive Name (.zip)</label>
+            <input type="text" id="zipNameInput" placeholder="archive.zip">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('zipModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitZip()" class="btn btn-primary">Compress Now</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Unzip -->
+<div id="unzipModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Extract ZIP Archive</h3>
+        <input type="hidden" id="unzipSourcePath">
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Extract Destination (leave empty for current folder)</label>
+            <input type="text" id="unzipDestInput" placeholder="current folder">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('unzipModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitUnzip()" class="btn btn-success">Extract Archive</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Image Preview -->
+<div id="imagePreviewModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 700px; text-align: center;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;" id="imagePreviewTitle">Image Preview</h3>
+        <div style="max-height: 500px; overflow: auto; margin-bottom: 16px;">
+            <img id="imagePreviewImg" src="" style="max-width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--border);">
+        </div>
+        <button onclick="closeModal('imagePreviewModal')" class="btn btn-secondary">Close</button>
+    </div>
+</div>
+
 <script>
-let currentEditingPath = null;
-const selectedSiteId = {{ selected_site.id if selected_site else 'null' }};
-const currentRelPath = "{{ current_path }}";
+    const SITE_ID = {{ selected_site.id }};
+    const CURRENT_PATH = "{{ current_path }}";
+    let aceEditor = null;
+    let editingFilePath = "";
 
-// Hotkey: Ctrl+S / Cmd+S
-window.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
-        e.preventDefault();
-        if (currentEditingPath) {
-            saveCurrentFile();
+    // Initialize Ace Editor
+    document.addEventListener("DOMContentLoaded", function() {
+        if (typeof ace !== 'undefined') {
+            aceEditor = ace.edit("aceEditorContainer");
+            aceEditor.setTheme("ace/theme/tomorrow_night_eighties");
+            aceEditor.session.setMode("ace/mode/php");
+            aceEditor.setOptions({
+                fontSize: "14px",
+                showPrintMargin: false,
+                highlightActiveLine: true,
+                wrap: true,
+                autoScrollEditorIntoView: true
+            });
+
+            // Update cursor position
+            aceEditor.selection.on("changeCursor", function() {
+                const pos = aceEditor.getCursorPosition();
+                document.getElementById("editorCursorPos").innerText = `Ln ${pos.row + 1}, Col ${pos.column + 1}`;
+            });
+
+            // Keyboard shortcut Ctrl+S / Cmd+S
+            aceEditor.commands.addCommand({
+                name: "save",
+                bindKey: {win: "Ctrl-S", mac: "Command-S"},
+                exec: function() {
+                    saveCurrentFile();
+                }
+            });
         }
-    }
-});
 
-// Tab key inside editor
-const editorArea = document.getElementById('codeEditorArea');
-if (editorArea) {
-    editorArea.addEventListener('keydown', function(e) {
-        if (e.key === 'Tab') {
+        // Global Drag & Drop handling
+        window.addEventListener("dragover", function(e) {
             e.preventDefault();
-            const start = this.selectionStart;
-            const end = this.selectionEnd;
-            this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
-            this.selectionStart = this.selectionEnd = start + 4;
+            document.getElementById("dropZone").style.display = "block";
+            document.getElementById("dropZone").classList.add("dragover");
+        });
+        window.addEventListener("dragleave", function(e) {
+            if (e.clientX <= 0 || e.clientY <= 0) {
+                document.getElementById("dropZone").classList.remove("dragover");
+            }
+        });
+        window.addEventListener("drop", function(e) {
+            e.preventDefault();
+            document.getElementById("dropZone").classList.remove("dragover");
+            if (e.dataTransfer && e.dataTransfer.files.length > 0) {
+                handleMultiUpload(e.dataTransfer.files);
+            }
+        });
+    });
+
+    function toggleDropZone() {
+        const dz = document.getElementById("dropZone");
+        dz.style.display = dz.style.display === "none" ? "block" : "none";
+    }
+
+    function copyCurrentPath() {
+        const full = "/www/wwwroot/{{ selected_site.domain }}/" + CURRENT_PATH;
+        navigator.clipboard.writeText(full.replace("//", "/"));
+        showToast("Path copied to clipboard!", "success");
+    }
+
+    // Realtime file filter
+    function filterFiles() {
+        const query = document.getElementById("filterInput").value.toLowerCase().trim();
+        const rows = document.querySelectorAll("#fileTable tbody tr.file-row");
+        rows.forEach(r => {
+            const name = r.getAttribute("data-name") || "";
+            r.style.display = name.includes(query) ? "" : "none";
+        });
+    }
+
+    // Modal Helpers
+    function openModal(id) {
+        document.getElementById(id).classList.add("active");
+    }
+    function closeModal(id) {
+        document.getElementById(id).classList.remove("active");
+    }
+
+    // Edit File in Ace
+    async function editFile(path, filename, ext) {
+        try {
+            const res = await fetch(`/file-manager/read?site_id=${SITE_ID}&path=${encodeURIComponent(path)}`);
+            const data = await res.json();
+            if (!data.success) {
+                showToast(data.error || "Failed to load file", "danger");
+                return;
+            }
+
+            editingFilePath = path;
+            document.getElementById("editorFileName").innerText = filename;
+            
+            // Set Ace Mode based on extension
+            const modeMap = {
+                "php": "php", "phtml": "php",
+                "html": "html", "htm": "html",
+                "js": "javascript", "ts": "typescript",
+                "css": "css", "scss": "scss",
+                "json": "json",
+                "py": "python",
+                "sql": "sql",
+                "sh": "sh", "bash": "sh",
+                "md": "markdown",
+                "xml": "xml",
+                "yml": "yaml", "yaml": "yaml"
+            };
+            const mode = modeMap[ext] || "text";
+            aceEditor.session.setMode(`ace/mode/${mode}`);
+            document.getElementById("editorModeBadge").innerText = mode.toUpperCase();
+
+            aceEditor.setValue(data.content, -1);
+            document.getElementById("editorContainer").style.display = "block";
+            document.getElementById("editorContainer").scrollIntoView({ behavior: "smooth" });
+            aceEditor.focus();
+        } catch (e) {
+            showToast("Network error reading file", "danger");
         }
-    });
-    editorArea.addEventListener('input', function() {
-        document.getElementById('charCount').textContent = `${this.value.length} characters`;
-    });
-}
-
-async function editFile(path, name) {
-    showToast(`Loading ${name}...`, 'success');
-    const res = await fetch(`/file-manager/read?site_id=${selectedSiteId}&path=${encodeURIComponent(path)}`);
-    const data = await res.json();
-    if (data.success) {
-        currentEditingPath = path;
-        document.getElementById('editorFileName').textContent = name;
-        editorArea.value = data.content;
-        document.getElementById('charCount').textContent = `${data.content.length} characters`;
-        document.getElementById('editorContainer').style.display = 'block';
-        window.scrollTo({ top: document.getElementById('editorContainer').offsetTop - 20, behavior: 'smooth' });
-    } else {
-        showToast(data.error || 'Failed to open file', 'danger');
     }
-}
 
-async function saveCurrentFile() {
-    if (!currentEditingPath) return;
-    const formData = new FormData();
-    formData.append('site_id', selectedSiteId);
-    formData.append('path', currentEditingPath);
-    formData.append('content', editorArea.value);
+    async function saveCurrentFile() {
+        if (!editingFilePath) return;
+        const statusSpan = document.getElementById("editorSaveStatus");
+        statusSpan.style.display = "inline";
+        statusSpan.innerText = "Saving...";
 
-    const res = await fetch('/file-manager/save', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.success) {
-        showToast(data.message, 'success');
-    } else {
-        showToast(data.error || 'Failed to save', 'danger');
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("path", editingFilePath);
+        formData.append("content", aceEditor.getValue());
+
+        try {
+            const res = await fetch("/file-manager/save", { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.success) {
+                statusSpan.innerText = "✓ Saved";
+                statusSpan.style.color = "var(--success)";
+                showToast("File saved successfully!", "success");
+                setTimeout(() => { statusSpan.style.display = "none"; }, 2000);
+            } else {
+                statusSpan.innerText = "Save failed";
+                statusSpan.style.color = "var(--danger)";
+                showToast(data.error || "Save failed", "danger");
+            }
+        } catch (e) {
+            showToast("Network error saving file", "danger");
+        }
     }
-}
 
-function closeEditor() {
-    currentEditingPath = null;
-    document.getElementById('editorContainer').style.display = 'none';
-}
-
-async function submitNewFile() {
-    const filename = document.getElementById('newFileNameInput').value.trim();
-    if (!filename) return;
-    const formData = new FormData();
-    formData.append('site_id', selectedSiteId);
-    formData.append('path', currentRelPath);
-    formData.append('filename', filename);
-
-    const res = await fetch('/file-manager/create-file', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.success) {
-        showToast(data.message, 'success');
-        setTimeout(() => location.reload(), 1000);
-    } else {
-        showToast(data.error || 'Failed to create file', 'danger');
+    function closeEditor() {
+        document.getElementById("editorContainer").style.display = "none";
+        editingFilePath = "";
     }
-}
 
-async function submitNewFolder() {
-    const foldername = document.getElementById('newFolderNameInput').value.trim();
-    if (!foldername) return;
-    const formData = new FormData();
-    formData.append('site_id', selectedSiteId);
-    formData.append('path', currentRelPath);
-    formData.append('foldername', foldername);
-
-    const res = await fetch('/file-manager/create-folder', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.success) {
-        showToast(data.message, 'success');
-        setTimeout(() => location.reload(), 1000);
-    } else {
-        showToast(data.error || 'Failed to create folder', 'danger');
+    function toggleEditorFullscreen() {
+        const container = document.getElementById("editorContainer");
+        container.classList.toggle("editor-fullscreen");
+        if (aceEditor) aceEditor.resize();
     }
-}
 
-async function deleteItem(path) {
-    if (!confirm(`Delete ${path}? This action cannot be undone.`)) return;
-    const formData = new FormData();
-    formData.append('site_id', selectedSiteId);
-    formData.append('path', path);
-
-    const res = await fetch('/file-manager/delete', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.success) {
-        showToast(data.message, 'success');
-        if (currentEditingPath === path) closeEditor();
-        setTimeout(() => location.reload(), 1000);
-    } else {
-        showToast(data.error || 'Failed to delete', 'danger');
+    // Image preview
+    function previewImage(path, filename) {
+        document.getElementById("imagePreviewTitle").innerText = filename;
+        document.getElementById("imagePreviewImg").src = `/file-manager/download?site_id=${SITE_ID}&path=${encodeURIComponent(path)}`;
+        openModal("imagePreviewModal");
     }
-}
 
-async function handleUpload(input) {
-    if (!input.files || input.files.length === 0) return;
-    const file = input.files[0];
-    showToast(`Uploading ${file.name}...`, 'success');
-    const formData = new FormData();
-    formData.append('site_id', selectedSiteId);
-    formData.append('path', currentRelPath);
-    formData.append('file', file);
+    // Multi-File Upload
+    async function handleMultiUpload(files) {
+        if (!files || files.length === 0) return;
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("path", CURRENT_PATH);
 
-    const res = await fetch('/file-manager/upload', { method: 'POST', body: formData });
-    const data = await res.json();
-    if (data.success) {
-        showToast(data.message, 'success');
-        setTimeout(() => location.reload(), 1200);
-    } else {
-        showToast(data.error || 'Upload failed', 'danger');
+        for (let i = 0; i < files.length; i++) {
+            formData.append("files", files[i]);
+        }
+
+        showToast(`Uploading ${files.length} file(s)...`, "success");
+        try {
+            const res = await fetch("/file-manager/upload", { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, "success");
+                setTimeout(() => location.reload(), 600);
+            } else {
+                showToast(data.error || "Upload failed", "danger");
+            }
+        } catch (e) {
+            showToast("Upload error: " + e, "danger");
+        }
     }
-}
 
-async function fixPerms() {
-    showToast('Normalizing file permissions...', 'success');
-    const formData = new FormData();
-    formData.append('site_id', selectedSiteId);
+    // Single item delete
+    async function deleteSingleItem(path) {
+        if (!confirm(`Are you sure you want to permanently delete: ${path}?`)) return;
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("path", path);
 
-    const res = await fetch('/file-manager/fix-permissions', { method: 'POST', body: formData });
-    const data = await res.json();
-    showToast(data.message, data.success ? 'success' : 'danger');
-}
+        const res = await fetch("/file-manager/delete", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast("Deleted successfully", "success");
+            location.reload();
+        } else {
+            showToast(data.error || "Delete failed", "danger");
+        }
+    }
+
+    // Rename
+    function openRenameModal(path, name) {
+        document.getElementById("renameOldPath").value = path;
+        document.getElementById("renameNewNameInput").value = name;
+        openModal("renameModal");
+    }
+
+    async function submitRename() {
+        const oldPath = document.getElementById("renameOldPath").value;
+        const newName = document.getElementById("renameNewNameInput").value;
+        if (!newName) return;
+
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("old_path", oldPath);
+        formData.append("new_name", newName);
+
+        const res = await fetch("/file-manager/rename", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast("Renamed successfully", "success");
+            location.reload();
+        } else {
+            showToast(data.error || "Rename failed", "danger");
+        }
+    }
+
+    // Chmod permissions
+    function openChmodModal(path, perms) {
+        document.getElementById("chmodPath").value = path;
+        const cleanPerms = perms.slice(-3);
+        document.getElementById("chmodOctalInput").value = cleanPerms;
+        syncPermCheckboxes();
+        openModal("chmodModal");
+    }
+
+    function syncPermCheckboxes() {
+        const val = document.getElementById("chmodOctalInput").value.trim().slice(-3);
+        if (val.length !== 3) return;
+        const u = parseInt(val[0], 10) || 0;
+        const g = parseInt(val[1], 10) || 0;
+        const o = parseInt(val[2], 10) || 0;
+
+        document.getElementById("p_u_r").checked = (u & 4) !== 0;
+        document.getElementById("p_u_w").checked = (u & 2) !== 0;
+        document.getElementById("p_u_x").checked = (u & 1) !== 0;
+
+        document.getElementById("p_g_r").checked = (g & 4) !== 0;
+        document.getElementById("p_g_w").checked = (g & 2) !== 0;
+        document.getElementById("p_g_x").checked = (g & 1) !== 0;
+
+        document.getElementById("p_o_r").checked = (o & 4) !== 0;
+        document.getElementById("p_o_w").checked = (o & 2) !== 0;
+        document.getElementById("p_o_x").checked = (o & 1) !== 0;
+    }
+
+    function syncOctalFromCheckboxes() {
+        let u = (document.getElementById("p_u_r").checked ? 4 : 0) +
+                (document.getElementById("p_u_w").checked ? 2 : 0) +
+                (document.getElementById("p_u_x").checked ? 1 : 0);
+        let g = (document.getElementById("p_g_r").checked ? 4 : 0) +
+                (document.getElementById("p_g_w").checked ? 2 : 0) +
+                (document.getElementById("p_g_x").checked ? 1 : 0);
+        let o = (document.getElementById("p_o_r").checked ? 4 : 0) +
+                (document.getElementById("p_o_w").checked ? 2 : 0) +
+                (document.getElementById("p_o_x").checked ? 1 : 0);
+        document.getElementById("chmodOctalInput").value = `0${u}${g}${o}`;
+    }
+
+    async function submitChmod() {
+        const path = document.getElementById("chmodPath").value;
+        const perms = document.getElementById("chmodOctalInput").value;
+        const recursive = document.getElementById("chmodRecursive").checked;
+
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("path", path);
+        formData.append("perms", perms);
+        formData.append("recursive", recursive);
+
+        const res = await fetch("/file-manager/chmod", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast("Permissions updated", "success");
+            location.reload();
+        } else {
+            showToast(data.error || "Chmod failed", "danger");
+        }
+    }
+
+    // Unzip
+    function openUnzipModal(zipPath) {
+        document.getElementById("unzipSourcePath").value = zipPath;
+        document.getElementById("unzipDestInput").value = CURRENT_PATH;
+        openModal("unzipModal");
+    }
+
+    async function submitUnzip() {
+        const zipPath = document.getElementById("unzipSourcePath").value;
+        const dest = document.getElementById("unzipDestInput").value;
+
+        showToast("Extracting archive...", "success");
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("zip_path", zipPath);
+        formData.append("dest_path", dest);
+
+        const res = await fetch("/file-manager/unzip", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast("Archive extracted successfully!", "success");
+            setTimeout(() => location.reload(), 700);
+        } else {
+            showToast(data.error || "Unzip failed", "danger");
+        }
+    }
+
+    // Compress (Zip)
+    function openBatchZipModal() {
+        const selected = getSelectedPaths();
+        if (selected.length === 0) return;
+        document.getElementById("zipNameInput").value = (selected.length === 1 ? selected[0].split("/").pop() : "archive") + ".zip";
+        openModal("zipModal");
+    }
+
+    async function submitZip() {
+        const selected = getSelectedPaths();
+        const zipName = document.getElementById("zipNameInput").value;
+        if (!zipName || selected.length === 0) return;
+
+        showToast("Compressing files...", "success");
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("paths", JSON.stringify(selected));
+        formData.append("zip_name", zipName);
+        formData.append("current_dir", CURRENT_PATH);
+
+        const res = await fetch("/file-manager/zip", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast("Created ZIP archive successfully!", "success");
+            setTimeout(() => location.reload(), 700);
+        } else {
+            showToast(data.error || "Compression failed", "danger");
+        }
+    }
+
+    // Batch operations & Selection
+    function getSelectedPaths() {
+        const checked = document.querySelectorAll(".file-check:checked");
+        return Array.from(checked).map(c => c.value);
+    }
+
+    function toggleSelectAll(master) {
+        const checks = document.querySelectorAll(".file-check");
+        checks.forEach(c => {
+            c.checked = master.checked;
+            const rowId = c.getAttribute("onchange").match(/'([^']+)'\)$/)?.[1];
+            if (rowId) {
+                document.getElementById(rowId).classList.toggle("selected", master.checked);
+            }
+        });
+        updateBatchBar();
+    }
+
+    function handleRowSelect(checkbox, rowId) {
+        document.getElementById(rowId).classList.toggle("selected", checkbox.checked);
+        updateBatchBar();
+    }
+
+    function updateBatchBar() {
+        const count = getSelectedPaths().length;
+        const bar = document.getElementById("batchBar");
+        if (count > 0) {
+            bar.style.display = "flex";
+            document.getElementById("batchCount").innerText = `${count} item(s) selected`;
+        } else {
+            bar.style.display = "none";
+        }
+    }
+
+    function clearSelection() {
+        document.getElementById("selectAllCheckbox").checked = false;
+        toggleSelectAll(document.getElementById("selectAllCheckbox"));
+    }
+
+    async function executeBatchDelete() {
+        const selected = getSelectedPaths();
+        if (selected.length === 0) return;
+        if (!confirm(`Are you sure you want to delete ${selected.length} selected items?`)) return;
+
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("paths", JSON.stringify(selected));
+
+        const res = await fetch("/file-manager/batch-delete", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`Deleted ${data.deleted_count} items`, "success");
+            setTimeout(() => location.reload(), 500);
+        } else {
+            showToast("Batch delete failed", "danger");
+        }
+    }
+
+    // Create File / Folder
+    async function submitNewFile() {
+        const name = document.getElementById("newFileNameInput").value.trim();
+        if (!name) return;
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("path", CURRENT_PATH);
+        formData.append("filename", name);
+
+        const res = await fetch("/file-manager/create-file", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, "success");
+            location.reload();
+        } else {
+            showToast(data.error || "Create failed", "danger");
+        }
+    }
+
+    async function submitNewFolder() {
+        const name = document.getElementById("newFolderNameInput").value.trim();
+        if (!name) return;
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+        formData.append("path", CURRENT_PATH);
+        formData.append("foldername", name);
+
+        const res = await fetch("/file-manager/create-folder", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, "success");
+            location.reload();
+        } else {
+            showToast(data.error || "Create folder failed", "danger");
+        }
+    }
+
+    // Fix permissions
+    async function fixPerms() {
+        if (!confirm("This will safely reset all files & directories in this website to 775/664 owned by www-data. Proceed?")) return;
+        const formData = new FormData();
+        formData.append("site_id", SITE_ID);
+
+        showToast("Repairing permissions...", "success");
+        const res = await fetch("/file-manager/fix-permissions", { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, "success");
+            setTimeout(() => location.reload(), 700);
+        } else {
+            showToast(data.error || "Repair failed", "danger");
+        }
+    }
 </script>
+{% endif %}
 {% endblock %}
