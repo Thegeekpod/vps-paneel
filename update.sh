@@ -55,25 +55,29 @@ fi
 chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
 chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
 
-cat > /etc/nginx/sites-available/phpmyadmin.conf << EOF
+cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF'
 server {
     listen 888 default_server;
     listen [::]:888 default_server;
     server_name _;
     root /var/www/phpmyadmin;
     index index.php index.html index.htm;
+
     location / {
-        try_files \\\$uri \\\$uri/ /index.php?\\\$query_string;
+        try_files $uri $uri/ /index.php?$query_string;
     }
-    location ~ \\.php$ {
+
+    location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:${PHP_SOCK};
-        fastcgi_param SCRIPT_FILENAME /var/www/phpmyadmin\\\$fastcgi_script_name;
+        fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
     }
 }
 EOF
+sed -i "s|PHP_SOCK_PLACEHOLDER|${PHP_SOCK}|g" /etc/nginx/sites-available/phpmyadmin.conf
 ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
-nginx -t 2>/dev/null && (systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null) || true
+nginx -t && (systemctl reload nginx || systemctl restart nginx)
 
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1 || true
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"

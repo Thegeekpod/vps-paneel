@@ -150,23 +150,27 @@ chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
 PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
 if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
 
-cat > /etc/nginx/sites-available/phpmyadmin.conf << EOF
+cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF'
 server {
     listen 888 default_server;
     listen [::]:888 default_server;
     server_name _;
     root /var/www/phpmyadmin;
     index index.php index.html index.htm;
+
     location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
+        try_files $uri $uri/ /index.php?$query_string;
     }
+
     location ~ \.php$ {
         include snippets/fastcgi-php.conf;
-        fastcgi_pass unix:${PHP_SOCK};
-        fastcgi_param SCRIPT_FILENAME /var/www/phpmyadmin\$fastcgi_script_name;
+        fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
     }
 }
 EOF
+sed -i "s|PHP_SOCK_PLACEHOLDER|${PHP_SOCK}|g" /etc/nginx/sites-available/phpmyadmin.conf
 ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
 
 nginx -t
