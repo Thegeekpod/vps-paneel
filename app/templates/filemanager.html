@@ -293,13 +293,13 @@
                         <div style="display: inline-flex; gap: 4px;">
                             {% if item.is_editable %}
                             <button onclick="editFile('{{ item.rel_path }}', '{{ item.name }}', '{{ item.ext }}')" class="btn btn-primary" style="padding: 4px 8px; font-size: 11px;" title="Edit Code">
-                                ✏️ Edit
+                                ✏️
                             </button>
                             {% endif %}
 
                             {% if item.is_archive %}
-                            <button onclick="openUnzipModal('{{ item.rel_path }}')" class="btn btn-success" style="padding: 4px 8px; font-size: 11px;" title="Unzip/Extract">
-                                🗜️ Unzip
+                            <button onclick="openUnzipModal('{{ item.rel_path }}')" class="btn btn-success" style="padding: 4px 8px; font-size: 11px;" title="Unzip / Extract">
+                                🗜️
                             </button>
                             {% endif %}
 
