@@ -158,6 +158,7 @@ WorkingDirectory=${INSTALL_DIR}
 Environment="WEB_ROOT=/www/wwwroot"
 Environment="PANEL_PORT=${PANEL_PORT}"
 Environment="PANEL_DATA_DIR=${INSTALL_DIR}/data"
+Environment="GIT_REPO_DIR=${SCRIPT_DIR}"
 ExecStart=${INSTALL_DIR}/venv/bin/python3 run.py
 Restart=always
 RestartSec=3

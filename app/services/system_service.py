@@ -65,3 +65,75 @@ def control_service(service_name: str, action: str) -> bool:
         return res.returncode == 0
     except Exception:
         return False
+
+def check_panel_update() -> Dict[str, Any]:
+    from app.config import get_git_repo_dir
+    repo_dir = get_git_repo_dir()
+    if not repo_dir.exists() or not (repo_dir / ".git").exists():
+        return {
+            "has_update": False,
+            "message": "Git repo not found",
+            "local_commit": "v2.0",
+            "remote_commit": "",
+            "commit_msg": ""
+        }
+    
+    try:
+        local_res = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(repo_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+        )
+        local_commit = local_res.stdout.strip()
+
+        # Fetch remote updates silently
+        subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            cwd=str(repo_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10
+        )
+
+        remote_res = subprocess.run(
+            ["git", "rev-parse", "--short", "origin/main"],
+            cwd=str(repo_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+        )
+        remote_commit = remote_res.stdout.strip()
+
+        msg_res = subprocess.run(
+            ["git", "log", "-1", "--pretty=%s", "origin/main"],
+            cwd=str(repo_dir), stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+        )
+        commit_msg = msg_res.stdout.strip()
+
+        has_update = bool(remote_commit) and (local_commit != remote_commit)
+        return {
+            "has_update": has_update,
+            "local_commit": local_commit,
+            "remote_commit": remote_commit,
+            "commit_msg": commit_msg or "New panel improvements from GitHub",
+            "message": "Update available!" if has_update else "Panel is up to date."
+        }
+    except Exception as e:
+        return {
+            "has_update": False,
+            "message": str(e),
+            "local_commit": "unknown",
+            "remote_commit": "",
+            "commit_msg": ""
+        }
+
+def perform_panel_update() -> Dict[str, Any]:
+    from app.config import get_git_repo_dir
+    repo_dir = get_git_repo_dir()
+    update_script = repo_dir / "update.sh"
+    if not update_script.exists():
+        return {"success": False, "error": f"Update script not found at {update_script}"}
+
+    try:
+        cmd = f"nohup bash {update_script} > /tmp/vps_panel_update.log 2>&1 &"
+        subprocess.Popen(cmd, shell=True, cwd=str(repo_dir))
+        return {
+            "success": True,
+            "message": "Panel update process initiated in background. The service will reload in a few seconds."
+        }
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+

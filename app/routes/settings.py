@@ -51,3 +51,16 @@ async def change_password(
 
     log_action(user["username"], "ChangePassword", "Admin changed password", request.client.host)
     return RedirectResponse(url="/settings?success=1", status_code=303)
+
+@router.get("/check-update")
+async def api_check_update(user: dict = Depends(login_required)):
+    from app.services.system_service import check_panel_update
+    return check_panel_update()
+
+@router.post("/apply-update")
+async def api_apply_update(request: Request, user: dict = Depends(login_required)):
+    from app.services.system_service import perform_panel_update
+    result = perform_panel_update()
+    log_action(user["username"], "PanelUpdate", "Triggered self-update from GitHub", request.client.host)
+    return JSONResponse(result)
+

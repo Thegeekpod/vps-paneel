@@ -54,6 +54,10 @@
                 {% block page_title %}Dashboard{% endblock %}
             </div>
             <div class="topbar-right">
+                <!-- Update Panel Button with Blinking State -->
+                <button id="btnUpdatePanel" onclick="openUpdateModal()" class="btn btn-update-idle" style="display: inline-flex; align-items: center; gap: 6px;">
+                    <span id="updateIcon">🔄</span> <span id="updateText">v2.0 Up to date</span>
+                </button>
                 <span style="font-size: 13px; color: var(--text-secondary);">Logged in as <strong style="color: var(--text-primary);">{{ user.username }}</strong></span>
                 <a href="/logout" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Sign Out</a>
             </div>
@@ -62,6 +66,55 @@
         <main class="content">
             {% block content %}{% endblock %}
         </main>
+    </div>
+
+    <!-- Modal: Panel Auto-Update -->
+    <div id="panelUpdateModal" class="modal-overlay">
+        <div class="modal-box" style="max-width: 520px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+                <h3 style="font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                    <span>🚀</span> VPS Panel Auto-Updater
+                </h3>
+                <button onclick="closeModal('panelUpdateModal')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;">✕</button>
+            </div>
+
+            <!-- Normal Status View -->
+            <div id="updateStatusContent">
+                <div style="background: #0f172a; border: 1px solid var(--border); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                        <span style="color: var(--text-muted);">CURRENT LOCAL COMMIT:</span>
+                        <span style="font-family: monospace; font-weight: 600; color: #fff;" id="updateCurrentCommit">Loading...</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-top: 8px;">
+                        <span style="color: var(--text-muted);">LATEST GITHUB COMMIT:</span>
+                        <span style="font-family: monospace; font-weight: 600; color: var(--accent);" id="updateRemoteCommit">Checking...</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-secondary); margin-top: 10px; font-style: italic;" id="updateCommitMsg"></div>
+                </div>
+
+                <div id="updateNoticeArea" style="margin-bottom: 18px; font-size: 13px; line-height: 1.5;"></div>
+
+                <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                    <button onclick="checkPanelUpdates(true)" class="btn btn-secondary">🔄 Check Again</button>
+                    <button id="btnStartUpdate" onclick="applyUpdateNow()" class="btn btn-primary" style="display: none;">
+                        🚀 Update Panel Now
+                    </button>
+                </div>
+            </div>
+
+            <!-- Updating in progress view -->
+            <div id="updateProgressContent" style="display: none; text-align: center; padding: 20px 0;">
+                <div style="font-size: 38px; margin-bottom: 12px;">⚡</div>
+                <h4 style="font-size: 16px; font-weight: 700; margin-bottom: 8px;">Applying Panel Update...</h4>
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 16px;">
+                    Pulling latest commits from GitHub & reloading service.
+                </p>
+                <div style="font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 12px;" id="updateCountdown">Reloading in 6s...</div>
+                <div class="progress-bg" style="max-width: 300px; margin: 0 auto; height: 6px;">
+                    <div class="progress-bar" id="updateProgressBar" style="width: 15%;"></div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Toast container -->

@@ -400,3 +400,43 @@ input:focus, select:focus, textarea:focus {
     height: 100vh !important;
 }
 
+/* Update Button Blinking & Pulse Effects */
+@keyframes pulseBlink {
+    0% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.75);
+        transform: scale(1);
+    }
+    50% {
+        box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+        transform: scale(1.04);
+    }
+    100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0);
+        transform: scale(1);
+    }
+}
+
+.btn-update-blinking {
+    animation: pulseBlink 1.4s infinite !important;
+    background: linear-gradient(135deg, #ef4444, #f97316) !important;
+    color: #ffffff !important;
+    border: 1px solid #f87171 !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.5) !important;
+    cursor: pointer;
+}
+
+.btn-update-idle {
+    background: #1e293b;
+    color: var(--text-secondary);
+    border: 1px solid var(--border-hover);
+    font-size: 12px;
+    padding: 6px 12px;
+    cursor: pointer;
+}
+.btn-update-idle:hover {
+    color: #fff;
+    border-color: var(--accent);
+}
+
+

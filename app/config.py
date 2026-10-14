@@ -38,3 +38,14 @@ if os.name != 'nt' and hasattr(os, 'getuid') and os.getuid() == 0:
         NGINX_ENABLED.mkdir(parents=True, exist_ok=True)
     except Exception:
         pass
+
+def get_git_repo_dir() -> Path:
+    env_dir = os.getenv("GIT_REPO_DIR")
+    if env_dir and Path(env_dir).exists():
+        return Path(env_dir)
+    if Path("/var/www/vps-panel/.git").exists():
+        return Path("/var/www/vps-panel")
+    if (BASE_DIR / ".git").exists():
+        return BASE_DIR
+    return Path("/var/www/vps-panel")
+
