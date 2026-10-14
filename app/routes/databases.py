@@ -17,9 +17,6 @@ from app.services.database_service import (
     backup_db,
     restore_db,
     execute_query_console,
-    is_phpmyadmin_ready,
-    setup_phpmyadmin_service,
-    ensure_database_manager,
     get_database_tables,
     get_table_schema,
     get_table_data,
@@ -51,10 +48,6 @@ async def databases_view(request: Request, user: dict = Depends(login_required))
 
     mysql_status = get_service_status("mariadb") or get_service_status("mysql")
     server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
-    if not is_phpmyadmin_ready():
-        ensure_database_manager()
-    pma_ready = is_phpmyadmin_ready()
-    pma_url = f"http://{server_ip}:888"
 
     return render("databases.html", {
         "user": user,
@@ -62,16 +55,8 @@ async def databases_view(request: Request, user: dict = Depends(login_required))
         "backups": backups,
         "mysql_status": mysql_status,
         "server_ip": server_ip,
-        "pma_ready": pma_ready,
-        "pma_url": pma_url,
         "active_nav": "databases"
     }, request)
-
-@router.post("/setup-pma")
-async def setup_pma_action(request: Request, user: dict = Depends(login_required)):
-    success, msg = setup_phpmyadmin_service()
-    log_action(user["username"], "SetupPMA", f"phpMyAdmin setup status: {success}", request.client.host)
-    return JSONResponse({"success": success, "message": msg})
 
 
 @router.post("/create")
@@ -340,9 +325,6 @@ async def database_manage_view(
         schema = get_table_schema(db_name, active_table)
         data_res = get_table_data(db_name, active_table, page=1, page_size=25)
 
-    server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
-    pma_url = f"http://{server_ip}:888"
-
     return render("database_manager.html", {
         "user": user,
         "db_name": db_name,
@@ -352,8 +334,6 @@ async def database_manage_view(
         "active_tab": tab,
         "schema": schema,
         "data": data_res,
-        "pma_url": pma_url,
-        "server_ip": server_ip,
         "active_nav": "databases"
     }, request)
 
