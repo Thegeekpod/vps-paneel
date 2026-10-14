@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+
+{% block title %}Web Terminal - VPS Control Panel{% endblock %}
+{% block page_title %}💻 Web Terminal (Shell Console){% endblock %}
+
+{% block content %}
+<div class="terminal-container" style="background: #080c14; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.6); display: flex; flex-direction: column; height: calc(100vh - 140px);">
+    
+    <!-- Terminal Header Bar (CMD / Linux Window Style) -->
+    <div style="background: #0f172a; border-bottom: 1px solid #1e293b; padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.6);"></span>
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6);"></span>
+            <span style="display: inline-block; width: 12px; height: 12px; border-radius: 50%; background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.6);"></span>
+            <span style="font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 13px; font-weight: 700; color: #38bdf8; margin-left: 10px;">
+                bash: root@{{ server_ip }}
+            </span>
+            <span id="termCwdBadge" class="badge badge-gray" style="font-family: monospace; font-size: 11px; margin-left: 4px;">/root</span>
+        </div>
+
+        <!-- Quick Terminal Shortcuts -->
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+            <select id="quickCmdSelect" class="form-control" style="font-size: 11px; padding: 4px 8px; width: 150px; background: #1e293b; color: #f8fafc; border-color: #334155;" onchange="insertQuickCmd(this.value)">
+                <option value="">⚡ Quick Commands</option>
+                <option value="df -h">Disk Space (df -h)</option>
+                <option value="free -h">RAM Usage (free -h)</option>
+                <option value="uptime">Uptime & Load</option>
+                <option value="top -b -n 1 | head -n 20">Process Snapshot (top)</option>
+                <option value="nginx -t">Test Nginx Config</option>
+                <option value="systemctl status mariadb --no-pager">MariaDB Status</option>
+                <option value="systemctl status vps-panel --no-pager">Panel Daemon Status</option>
+                <option value="git status">Git Status</option>
+                <option value="curl -s ifconfig.me">Public IP Address</option>
+            </select>
+            <button onclick="clearTerminalScreen()" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">
+                🧹 Clear
+            </button>
+            <button onclick="restartTerminalSession()" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">
+                🔄 Reset
+            </button>
+        </div>
+    </div>
+
+    <!-- Terminal Screen / Log Window -->
+    <div id="terminalScreen" style="background: #030712; flex: 1; padding: 18px 20px; overflow-y: auto; font-family: 'JetBrains Mono', Consolas, Menlo, Monaco, 'Courier New', monospace; font-size: 13px; line-height: 1.6; color: #f1f5f9; white-space: pre-wrap; word-break: break-all;" onclick="focusTerminalInput()">
+        <div style="color: #64748b; margin-bottom: 12px;">
+Welcome to VPS Control Panel Linux Terminal (Python root session)
+System: Linux {{ server_ip }} (Ubuntu/Debian)
+Type your command and press Enter. Use Up/Down arrows for command history.
+========================================================================
+        </div>
+        <div id="terminalHistory"></div>
+        <div id="terminalActiveLine" style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+            <span id="termPrompt" style="color: #10b981; font-weight: 700; flex-shrink: 0;">root@vps-panel:<span id="termPromptDir" style="color: #38bdf8;">~</span>#</span>
+            <input type="text" id="terminalInput" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" style="flex: 1; background: transparent; border: none; outline: none; color: #f8fafc; font-family: inherit; font-size: inherit; padding: 0; margin: 0; caret-color: #38bdf8;">
+        </div>
+    </div>
+</div>
+
+<style>
+#terminalScreen::-webkit-scrollbar {
+    width: 8px;
+}
+#terminalScreen::-webkit-scrollbar-track {
+    background: #030712;
+}
+#terminalScreen::-webkit-scrollbar-thumb {
+    background: #1e293b;
+    border-radius: 4px;
+}
+#terminalScreen::-webkit-scrollbar-thumb:hover {
+    background: #334155;
+}
+.cmd-prompt {
+    color: #10b981;
+    font-weight: 700;
+}
+.cmd-user {
+    color: #ffffff;
+    font-weight: 600;
+}
+.cmd-output {
+    color: #cbd5e1;
+    margin-bottom: 8px;
+}
+.cmd-error {
+    color: #f87171;
+    margin-bottom: 8px;
+}
+</style>
+
+<script>
+let currentCwd = "/root";
+let commandHistory = [];
+let historyIndex = -1;
+
+const terminalScreen = document.getElementById("terminalScreen");
+const terminalInput = document.getElementById("terminalInput");
+const terminalHistory = document.getElementById("terminalHistory");
+const termPromptDir = document.getElementById("termPromptDir");
+const termCwdBadge = document.getElementById("termCwdBadge");
+
+function focusTerminalInput() {
+    terminalInput.focus();
+}
+
+function updatePromptDir(path) {
+    currentCwd = path;
+    termCwdBadge.innerText = path;
+    if (path === "/root") {
+        termPromptDir.innerText = "~";
+    } else {
+        const parts = path.split("/");
+        termPromptDir.innerText = parts[parts.length - 1] || "/";
+    }
+}
+
+function clearTerminalScreen() {
+    terminalHistory.innerHTML = "";
+    focusTerminalInput();
+}
+
+function restartTerminalSession() {
+    updatePromptDir("/root");
+    terminalHistory.innerHTML = '<div style="color: #64748b; margin-bottom: 8px;">[Session Reset] Terminal re-initialized at /root</div>';
+    terminalInput.value = "";
+    focusTerminalInput();
+}
+
+function insertQuickCmd(cmd) {
+    if (!cmd) return;
+    terminalInput.value = cmd;
+    document.getElementById("quickCmdSelect").value = "";
+    executeCurrentCommand();
+}
+
+async function executeCurrentCommand() {
+    const cmd = terminalInput.value.trim();
+    if (!cmd) return;
+
+    // Add to history
+    commandHistory.push(cmd);
+    historyIndex = commandHistory.length;
+
+    // Append executed command line to history DOM
+    const lineDiv = document.createElement("div");
+    lineDiv.innerHTML = `<span class="cmd-prompt">root@vps-panel:<span style="color:#38bdf8;">${termPromptDir.innerText}</span>#</span> <span class="cmd-user">${escapeHtml(cmd)}</span>`;
+    terminalHistory.appendChild(lineDiv);
+
+    terminalInput.value = "";
+    terminalInput.disabled = true;
+
+    // Handle 'clear' locally
+    if (cmd === "clear" || cmd === "cls") {
+        terminalHistory.innerHTML = "";
+        terminalInput.disabled = false;
+        focusTerminalInput();
+        return;
+    }
+
+    try {
+        const formData = new FormData();
+        formData.append("command", cmd);
+        formData.append("cwd", currentCwd);
+
+        const res = await fetch("/terminal/execute", {
+            method: "POST",
+            body: formData
+        });
+        const data = await res.json();
+        terminalInput.disabled = false;
+
+        if (data.cwd) {
+            updatePromptDir(data.cwd);
+        }
+
+        const outDiv = document.createElement("div");
+        if (data.returncode === 0) {
+            outDiv.className = "cmd-output";
+            outDiv.innerText = data.output;
+        } else {
+            outDiv.className = "cmd-error";
+            outDiv.innerText = data.output || `Process exited with code ${data.returncode}`;
+        }
+        terminalHistory.appendChild(outDiv);
+
+    } catch (e) {
+        terminalInput.disabled = false;
+        const errDiv = document.createElement("div");
+        errDiv.className = "cmd-error";
+        errDiv.innerText = "Network / execution error: " + e;
+        terminalHistory.appendChild(errDiv);
+    }
+
+    // Scroll to bottom
+    terminalScreen.scrollTop = terminalScreen.scrollHeight;
+    focusTerminalInput();
+}
+
+// Keyboard events (Enter, Arrow Up, Arrow Down)
+terminalInput.addEventListener("keydown", function(e) {
+    if (e.key === "Enter") {
+        e.preventDefault();
+        executeCurrentCommand();
+    } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (historyIndex > 0) {
+            historyIndex--;
+            terminalInput.value = commandHistory[historyIndex] || "";
+        }
+    } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (historyIndex < commandHistory.length - 1) {
+            historyIndex++;
+            terminalInput.value = commandHistory[historyIndex] || "";
+        } else {
+            historyIndex = commandHistory.length;
+            terminalInput.value = "";
+        }
+    }
+});
+
+function escapeHtml(str) {
+    return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    focusTerminalInput();
+});
+</script>
+{% endblock %}

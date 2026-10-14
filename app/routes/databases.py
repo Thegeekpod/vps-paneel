@@ -3,7 +3,9 @@ import shutil
 from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPException
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
+import asyncio
+import subprocess
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse, StreamingResponse
 
 from app.auth import login_required
 from app.database import get_db, log_action
@@ -56,6 +58,138 @@ async def databases_view(request: Request, user: dict = Depends(login_required))
         "pma_url": pma_url,
         "active_nav": "databases"
     }, request)
+
+@router.get("/stream-install-pma")
+async def stream_install_pma_action(request: Request, user: dict = Depends(login_required)):
+    server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
+
+    async def run_installer_stream():
+        script = f"""#!/usr/bin/env bash
+set -e
+exec 2>&1
+
+echo "===================================================================="
+echo " [TERMINAL] Starting Official phpMyAdmin 5.2.3 Setup"
+echo " Time: $(date)"
+echo " Server Host: {server_ip}"
+echo " Source: https://www.phpmyadmin.net/downloads/"
+echo "===================================================================="
+
+PMA_DIR="/var/www/phpmyadmin"
+
+echo "[-] 1/5 Checking PHP dependencies and FastCGI..."
+DEBIAN_FRONTEND=noninteractive apt-get update -y >/dev/null 2>&1 || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml curl tar gzip >/dev/null 2>&1 || true
+
+PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
+if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
+echo "[+] PHP FastCGI socket: ${{PHP_SOCK}}"
+
+echo "[-] 2/5 Downloading official phpMyAdmin from files.phpmyadmin.net..."
+PMA_TAR="/tmp/phpmyadmin-download.tar.gz"
+rm -f "$PMA_TAR"
+
+if curl -# -L "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.gz" -o "$PMA_TAR"; then
+    echo "[+] Downloaded phpMyAdmin 5.2.3 archive ($(du -h "$PMA_TAR" | cut -f1))"
+elif curl -# -L "https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.tar.gz" -o "$PMA_TAR"; then
+    echo "[+] Downloaded phpMyAdmin 5.2.2 archive ($(du -h "$PMA_TAR" | cut -f1))"
+else
+    echo "[!] Downloading phpMyAdmin 5.2.1..."
+    curl -# -L "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz" -o "$PMA_TAR"
+fi
+
+if [[ ! -f "$PMA_TAR" || ! -s "$PMA_TAR" ]]; then
+    echo "[FATAL ERROR] Download failed from phpmyadmin.net!"
+    exit 1
+fi
+
+echo "[-] 3/5 Extracting files into ${{PMA_DIR}}..."
+rm -rf "$PMA_DIR"
+mkdir -p "$PMA_DIR"
+tar -xzf "$PMA_TAR" -C "$PMA_DIR" --strip-components=1
+rm -f "$PMA_TAR"
+echo "[+] Extraction completed."
+
+echo "[-] 4/5 Generating config.inc.php with Blowfish encryption secret..."
+BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vpspanelblowfishsecretkey123456")
+cat > "$PMA_DIR/config.inc.php" << 'EOF_PMA'
+<?php
+declare(strict_types=1);
+
+$cfg['blowfish_secret'] = 'BLOWFISH_KEY_PLACEHOLDER';
+
+$i = 0;
+$i++;
+$cfg['Servers'][$i]['auth_type'] = 'cookie';
+$cfg['Servers'][$i]['host'] = 'localhost';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = true;
+
+$cfg['UploadDir'] = '';
+$cfg['SaveDir'] = '';
+$cfg['TempDir'] = '/var/www/phpmyadmin/tmp';
+EOF_PMA
+sed -i "s|BLOWFISH_KEY_PLACEHOLDER|${{BLOWFISH}}|g" "$PMA_DIR/config.inc.php"
+
+mkdir -p "$PMA_DIR/tmp"
+chmod 777 "$PMA_DIR/tmp"
+mkdir -p /var/www/html
+ln -sfn "$PMA_DIR" /var/www/html/phpmyadmin 2>/dev/null || true
+chown -R www-data:www-data "$PMA_DIR" 2>/dev/null || true
+chmod -R 755 "$PMA_DIR" 2>/dev/null || true
+echo "[+] Permissions set & Blowfish secret generated."
+
+echo "[-] 5/5 Configuring Nginx FastCGI on Port 888..."
+cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF_NGINX'
+server {{
+    listen 888 default_server;
+    listen [::]:888 default_server;
+    server_name _;
+    root /var/www/phpmyadmin;
+    index index.php index.html index.htm;
+
+    client_max_body_size 256M;
+
+    location / {{
+        try_files $uri $uri/ /index.php?$query_string;
+    }}
+
+    location ~ \\.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }}
+
+    location ~ /\\.ht {{
+        deny all;
+    }}
+}}
+EOF_NGINX
+sed -i "s|PHP_SOCK_PLACEHOLDER|${{PHP_SOCK}}|g" /etc/nginx/sites-available/phpmyadmin.conf
+ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
+ufw allow 888/tcp 2>/dev/null || true
+
+nginx -t
+systemctl reload nginx || systemctl restart nginx
+echo "[+] Nginx configuration verified & reloaded on Port 888."
+
+echo "===================================================================="
+echo " [SUCCESS] Official phpMyAdmin is INSTALLED and READY!"
+echo " Access URL: http://{server_ip}:888"
+echo "===================================================================="
+"""
+        proc = subprocess.Popen(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in iter(proc.stdout.readline, ''):
+            yield f"data: {line}\n\n"
+            await asyncio.sleep(0.01)
+        proc.stdout.close()
+        proc.wait()
+        if proc.returncode == 0:
+            yield "data: [DONE_SUCCESS]\n\n"
+        else:
+            yield f"data: [DONE_ERROR_CODE_{proc.returncode}]\n\n"
+
+    return StreamingResponse(run_installer_stream(), media_type="text/event-stream")
 
 @router.post("/install-pma")
 async def install_pma_action(request: Request, user: dict = Depends(login_required)):

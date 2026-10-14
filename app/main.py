@@ -10,7 +10,7 @@ from app.database import init_db, get_db, hash_password, log_action
 from app.auth import create_access_token, get_current_user, COOKIE_NAME
 from app.services.nginx_service import ensure_default_catchall
 from app.templates_util import render
-from app.routes import dashboard, websites, filemanager, databases, services, settings
+from app.routes import dashboard, websites, filemanager, databases, services, settings, terminal
 
 app = FastAPI(title="VPS Control Panel", docs_url=None, redoc_url=None)
 
@@ -26,6 +26,7 @@ app.include_router(filemanager.router)
 app.include_router(databases.router)
 app.include_router(services.router)
 app.include_router(settings.router)
+app.include_router(terminal.router)
 
 @app.on_event("startup")
 async def on_startup():
