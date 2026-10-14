@@ -109,6 +109,13 @@ if (typeof Terminal === "undefined") {
     height: 100%;
 }
 
+#terminalContainer,
+#terminalContainer * {
+    letter-spacing: normal !important;
+    word-spacing: normal !important;
+    font-variant-ligatures: none !important;
+}
+
 #terminalContainer .xterm {
     padding: 4px;
     height: 100%;
@@ -200,6 +207,8 @@ if (typeof Terminal === "undefined") {
 
         <!-- Clean Action Buttons (No dropdowns) -->
         <div style="display: flex; gap: 8px; align-items: center;">
+            <button onclick="changeFontSize(-1)" class="term-btn" title="Decrease font size" style="padding: 4px 8px; font-weight: 700;">A-</button>
+            <button onclick="changeFontSize(1)" class="term-btn" title="Increase font size" style="padding: 4px 8px; font-weight: 700;">A+</button>
             <button onclick="clearTerminal()" class="term-btn" title="Clear screen">
                 🧹 Clear
             </button>
@@ -241,8 +250,11 @@ function initTerminal() {
         cursorBlink: true,
         cursorStyle: "block",
         fontSize: 14,
-        fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, Monaco, Consolas, monospace",
-        lineHeight: 1.25,
+        fontWeight: "400",
+        fontWeightBold: "700",
+        fontFamily: "Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+        lineHeight: 1.15,
+        letterSpacing: 0,
         theme: {
             background: "#080c14",
             foreground: "#f8fafc",
@@ -379,6 +391,14 @@ function clearTerminal() {
         term.clear();
         focusTerminal();
     }
+}
+
+function changeFontSize(delta) {
+    if (!term) return;
+    const current = term.options.fontSize || 14;
+    const next = Math.min(24, Math.max(11, current + delta));
+    term.options.fontSize = next;
+    debounceFit();
 }
 
 function reconnectTerminal() {
