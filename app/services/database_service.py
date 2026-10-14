@@ -240,3 +240,75 @@ nginx -t && (systemctl reload nginx || systemctl restart nginx)
     except Exception as e:
         return False, str(e)
 
+def ensure_database_manager():
+    """Self-healing setup for /var/www/phpmyadmin and port 888."""
+    if os.name == 'nt':
+        return
+
+    from app.config import BASE_DIR
+    pma_dir = Path("/var/www/phpmyadmin")
+    pma_dir.mkdir(parents=True, exist_ok=True)
+    index_file = pma_dir / "index.php"
+
+    bundled_file = BASE_DIR / "app" / "static" / "adminer.php"
+    if bundled_file.exists():
+        if not index_file.exists() or index_file.stat().st_size < 10000:
+            try:
+                shutil.copyfile(bundled_file, index_file)
+                os.chmod(index_file, 0o755)
+                shutil.chown(index_file, user="www-data", group="www-data")
+            except Exception:
+                pass
+
+    try:
+        shutil.chown(pma_dir, user="www-data", group="www-data")
+        os.chmod(pma_dir, 0o755)
+    except Exception:
+        pass
+
+    # Ensure symlink in /var/www/html/phpmyadmin
+    try:
+        html_pma = Path("/var/www/html/phpmyadmin")
+        if not html_pma.exists():
+            html_pma.symlink_to(pma_dir)
+    except Exception:
+        pass
+
+    # Ensure Nginx config on port 888
+    pma_conf = Path("/etc/nginx/sites-available/phpmyadmin.conf")
+    pma_enabled = Path("/etc/nginx/sites-enabled/phpmyadmin.conf")
+
+    php_sock = "/run/php/php8.3-fpm.sock"
+    php_socks = list(Path("/run/php").glob("php*-fpm.sock"))
+    if php_socks:
+        php_sock = str(sorted(php_socks)[-1])
+
+    nginx_config = f"""server {{
+    listen 888 default_server;
+    listen [::]:888 default_server;
+    server_name _;
+    root /var/www/phpmyadmin;
+    index index.php index.html index.htm;
+
+    location / {{
+        try_files $uri $uri/ /index.php?$query_string;
+    }}
+
+    location ~ \\.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{php_sock};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }}
+}}
+"""
+    try:
+        if Path("/etc/nginx/sites-available").exists():
+            pma_conf.write_text(nginx_config)
+            if not pma_enabled.exists() and not pma_enabled.is_symlink():
+                pma_enabled.symlink_to(pma_conf)
+            subprocess.run(["nginx", "-t"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+            subprocess.run(["systemctl", "reload", "nginx"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+    except Exception:
+        pass
+
+

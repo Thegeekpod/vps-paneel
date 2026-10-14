@@ -19,6 +19,7 @@ from app.services.database_service import (
     execute_query_console,
     is_phpmyadmin_ready,
     setup_phpmyadmin_service,
+    ensure_database_manager,
     BACKUP_DIR
 )
 from app.services.system_service import get_service_status
@@ -43,6 +44,8 @@ async def databases_view(request: Request, user: dict = Depends(login_required))
 
     mysql_status = get_service_status("mariadb") or get_service_status("mysql")
     server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
+    if not is_phpmyadmin_ready():
+        ensure_database_manager()
     pma_ready = is_phpmyadmin_ready()
     pma_url = f"http://{server_ip}:888"
 

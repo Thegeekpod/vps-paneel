@@ -144,6 +144,8 @@ mkdir -p /var/www/phpmyadmin
 if [[ -f "$SCRIPT_DIR/app/static/adminer.php" ]]; then
     cp -f "$SCRIPT_DIR/app/static/adminer.php" /var/www/phpmyadmin/index.php
 fi
+mkdir -p /var/www/html
+ln -sfn /var/www/phpmyadmin /var/www/html/phpmyadmin 2>/dev/null || true
 chown -R www-data:www-data /var/www/phpmyadmin 2>/dev/null || true
 chmod -R 755 /var/www/phpmyadmin 2>/dev/null || true
 
@@ -166,7 +168,6 @@ server {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-        include fastcgi_params;
     }
 }
 EOF
