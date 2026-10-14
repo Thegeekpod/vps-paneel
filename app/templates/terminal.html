@@ -1,12 +1,29 @@
 {% extends "base.html" %}
 
-{% block title %}Web Terminal - VPS Control Panel{% endblock %}
-{% block page_title %}💻 Web Terminal (Real PTY Console){% endblock %}
+{% block title %}Terminal - VPS Control Panel{% endblock %}
+{% block page_title %}💻 Linux Shell Terminal{% endblock %}
 
-{% block head_extra %}
-<link rel="stylesheet" href="/static/vendor/xterm/xterm.min.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css'">
-<script src="/static/vendor/xterm/xterm.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js'"></script>
-<script src="/static/vendor/xterm/xterm-addon-fit.min.js" onerror="this.onerror=null;this.src='https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js'"></script>
+{% block head %}
+<!-- xterm CSS from local and CDN fallback -->
+<link rel="stylesheet" href="/static/vendor/xterm/xterm.min.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.min.css">
+<!-- xterm JS from local with CDN fallback -->
+<script src="/static/vendor/xterm/xterm.min.js"></script>
+<script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
+<script>
+if (typeof Terminal === "undefined") {
+    document.write('<script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js"><\/script>');
+    document.write('<script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.min.js"><\/script>');
+}
+</script>
+{% endblock %}
+
+{% block content %}
+<!-- Fallback load in content if head was bypassed -->
+<link rel="stylesheet" href="/static/vendor/xterm/xterm.min.css">
+<script src="/static/vendor/xterm/xterm.min.js"></script>
+<script src="/static/vendor/xterm/xterm-addon-fit.min.js"></script>
+
 <style>
 .terminal-window {
     background: #080c14;
@@ -16,10 +33,10 @@
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);
     display: flex;
     flex-direction: column;
-    height: calc(100vh - 140px);
+    height: calc(100vh - 135px);
     min-height: 520px;
     position: relative;
-    transition: all 0.2s ease;
+    box-sizing: border-box;
 }
 
 .terminal-window.is-fullscreen {
@@ -28,7 +45,7 @@
     left: 0 !important;
     width: 100vw !important;
     height: 100vh !important;
-    z-index: 99999 !important;
+    z-index: 999999 !important;
     border-radius: 0 !important;
     margin: 0 !important;
 }
@@ -40,9 +57,14 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
-    gap: 12px;
     user-select: none;
+    flex-shrink: 0;
+}
+
+.term-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
 }
 
 .term-dots {
@@ -56,29 +78,30 @@
     height: 12px;
     border-radius: 50%;
     display: inline-block;
+    cursor: pointer;
 }
 
-.term-dot.red { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
-.term-dot.yellow { background: #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
-.term-dot.green { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.5); }
+.term-dot.red { background: #ef4444; }
+.term-dot.yellow { background: #f59e0b; }
+.term-dot.green { background: #10b981; }
 
 .term-title {
     font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
     font-size: 13px;
     font-weight: 700;
     color: #38bdf8;
-    margin-left: 8px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .term-body {
     flex: 1;
     background: #080c14;
-    padding: 8px 10px;
+    padding: 6px 10px;
     overflow: hidden;
     position: relative;
+    cursor: text;
 }
 
 #terminalContainer {
@@ -155,47 +178,32 @@
     border-color: #475569;
 }
 </style>
-{% endblock %}
 
-{% block content %}
 <div class="terminal-window" id="terminalWindow">
     
-    <!-- Titlebar & Quick Action Header -->
+    <!-- Clean Authentic Terminal Titlebar -->
     <div class="term-header">
-        <div class="term-dots">
-            <span class="term-dot red" title="Close" onclick="resetTerminal()"></span>
-            <span class="term-dot yellow" title="Clear" onclick="clearTerminal()"></span>
-            <span class="term-dot green" title="Fullscreen" onclick="toggleFullscreen()"></span>
+        <div class="term-left">
+            <div class="term-dots">
+                <span class="term-dot red" title="Reset Session" onclick="reconnectTerminal()"></span>
+                <span class="term-dot yellow" title="Clear Screen" onclick="clearTerminal()"></span>
+                <span class="term-dot green" title="Toggle Fullscreen" onclick="toggleFullscreen()"></span>
+            </div>
             <div class="term-title">
                 <span>💻 root@{{ server_ip }}</span>
-                <span style="color: #64748b; font-weight: normal; font-size: 11px;">(/bin/bash login shell)</span>
+                <span style="color: #64748b; font-weight: normal; font-size: 11px;">(bash)</span>
             </div>
             <div id="termStatusBadge" class="status-badge connecting">
                 <span>●</span> Connecting...
             </div>
         </div>
 
-        <!-- Controls -->
-        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
-            <select id="quickCmdSelect" class="form-control" style="font-size: 11px; padding: 4px 8px; width: 155px; background: #1e293b; color: #f8fafc; border-color: #334155;" onchange="executeQuickCommand(this.value)">
-                <option value="">⚡ Quick Run...</option>
-                <option value="htop">System Monitor (htop)</option>
-                <option value="df -h">Disk Space (df -h)</option>
-                <option value="free -h">RAM Usage (free -h)</option>
-                <option value="uptime">Uptime & Load</option>
-                <option value="docker ps">Docker Containers</option>
-                <option value="nginx -t">Test Nginx Config</option>
-                <option value="systemctl status mariadb --no-pager">MariaDB Status</option>
-                <option value="systemctl status vps-panel --no-pager">Panel Status</option>
-                <option value="journalctl -u vps-panel -n 30 --no-pager">Panel Logs (last 30)</option>
-                <option value="git status">Git Status</option>
-                <option value="curl -s ifconfig.me">Server Public IP</option>
-            </select>
-
-            <button onclick="clearTerminal()" class="term-btn" title="Clear screen (Ctrl+L)">
+        <!-- Clean Action Buttons (No dropdowns) -->
+        <div style="display: flex; gap: 8px; align-items: center;">
+            <button onclick="clearTerminal()" class="term-btn" title="Clear screen">
                 🧹 Clear
             </button>
-            <button onclick="reconnectTerminal()" class="term-btn" title="Reconnect WebSocket">
+            <button onclick="reconnectTerminal()" class="term-btn" title="Restart bash session">
                 🔄 Reconnect
             </button>
             <button onclick="toggleFullscreen()" class="term-btn" id="btnFullscreen" title="Toggle Fullscreen">
@@ -204,8 +212,8 @@
         </div>
     </div>
 
-    <!-- Live xterm.js Canvas Container -->
-    <div class="term-body" onclick="focusTerminal()">
+    <!-- Live xterm.js Terminal Canvas -->
+    <div class="term-body" id="termBody" onclick="focusTerminal()">
         <div id="terminalContainer"></div>
     </div>
 </div>
@@ -221,10 +229,13 @@ const statusBadge = document.getElementById("termStatusBadge");
 const terminalWindow = document.getElementById("terminalWindow");
 
 function initTerminal() {
-    if (typeof Terminal === "undefined") {
-        setTimeout(initTerminal, 100);
+    if (typeof Terminal === "undefined" || typeof FitAddon === "undefined") {
+        setTimeout(initTerminal, 80);
         return;
     }
+
+    // Prevent double init
+    if (term) return;
 
     term = new Terminal({
         cursorBlink: true,
@@ -263,9 +274,13 @@ function initTerminal() {
     fitAddon = new FitAddon.FitAddon();
     term.loadAddon(fitAddon);
     term.open(terminalContainer);
-    fitAddon.fit();
+    
+    // Fit to container dimensions
+    try {
+        fitAddon.fit();
+    } catch (e) {}
 
-    // Send user keystrokes (Tab, Enter, arrows, Ctrl+C, typing) straight to PTY
+    // Send every keystroke (Tab, Enter, arrows, Ctrl+C, typing) directly to backend PTY
     term.onData(data => {
         if (socket && socket.readyState === WebSocket.OPEN) {
             socket.send(data);
@@ -274,13 +289,12 @@ function initTerminal() {
 
     connectWebSocket();
 
-    // Auto-fit on window resize
+    // Resize listeners
     window.addEventListener("resize", debounceFit);
 
-    // Resize observer for container changes
     if (window.ResizeObserver) {
         const ro = new ResizeObserver(() => debounceFit());
-        ro.observe(terminalContainer);
+        ro.observe(document.getElementById("termBody"));
     }
 }
 
@@ -300,11 +314,10 @@ function connectWebSocket() {
 
     socket.onopen = () => {
         updateStatus("connected", "🟢 Connected");
-        term.focus();
+        focusTerminal();
         
-        // Immediately sync window size with backend PTY
         setTimeout(() => {
-            fitAddon.fit();
+            if (fitAddon) fitAddon.fit();
             sendResize(term.cols, term.rows);
         }, 150);
     };
@@ -319,7 +332,9 @@ function connectWebSocket() {
 
     socket.onclose = () => {
         updateStatus("disconnected", "🔴 Disconnected");
-        term.write("\r\n\x1b[31m[Session closed. Click Reconnect to restart.]\x1b[0m\r\n");
+        if (term) {
+            term.write("\r\n\x1b[31m[Session closed. Click Reconnect to restart.]\x1b[0m\r\n");
+        }
     };
 
     socket.onerror = () => {
@@ -371,12 +386,6 @@ function reconnectTerminal() {
     connectWebSocket();
 }
 
-function resetTerminal() {
-    if (confirm("Reset current terminal session?")) {
-        reconnectTerminal();
-    }
-}
-
 function toggleFullscreen() {
     terminalWindow.classList.toggle("is-fullscreen");
     const btn = document.getElementById("btnFullscreen");
@@ -389,26 +398,17 @@ function toggleFullscreen() {
     focusTerminal();
 }
 
-function executeQuickCommand(cmd) {
-    if (!cmd) return;
-    document.getElementById("quickCmdSelect").value = "";
-    if (socket && socket.readyState === WebSocket.OPEN) {
-        socket.send(cmd + "\n");
-        focusTerminal();
-    } else {
-        alert("Terminal is not connected. Click Reconnect first.");
-    }
-}
-
-// Exit fullscreen on Escape
 document.addEventListener("keydown", e => {
     if (e.key === "Escape" && terminalWindow.classList.contains("is-fullscreen")) {
         toggleFullscreen();
     }
 });
 
-document.addEventListener("DOMContentLoaded", () => {
+// Start initialization
+if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", initTerminal);
+} else {
     initTerminal();
-});
+}
 </script>
 {% endblock %}

@@ -81,6 +81,12 @@ async def terminal_ws_endpoint(websocket: WebSocket):
 
     os.close(slave_fd)
 
+    try:
+        initial_winsize = struct.pack("HHHH", 28, 110, 0, 0)
+        fcntl.ioctl(master_fd, termios.TIOCSWINSZ, initial_winsize)
+    except Exception:
+        pass
+
     async def pty_to_ws():
         try:
             while True:
@@ -88,7 +94,7 @@ async def terminal_ws_endpoint(websocket: WebSocket):
                 if not data:
                     break
                 await websocket.send_bytes(data)
-        except Exception:
+        except (OSError, Exception):
             pass
 
     async def ws_to_pty():
@@ -99,15 +105,14 @@ async def terminal_ws_endpoint(websocket: WebSocket):
                     os.write(master_fd, msg["bytes"])
                 elif "text" in msg and msg["text"]:
                     text = msg["text"]
-                    if text.startswith("{") and "type" in text:
+                    if text.startswith('{"type":"resize"') or text.startswith('{"type": "resize"'):
                         try:
                             payload = json.loads(text)
-                            if payload.get("type") == "resize":
-                                cols = int(payload.get("cols", 80))
-                                rows = int(payload.get("rows", 24))
-                                winsize = struct.pack("HHHH", rows, cols, 0, 0)
-                                fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
-                                continue
+                            cols = int(payload.get("cols", 80))
+                            rows = int(payload.get("rows", 24))
+                            winsize = struct.pack("HHHH", rows, cols, 0, 0)
+                            fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
+                            continue
                         except Exception:
                             pass
                     os.write(master_fd, text.encode("utf-8"))
