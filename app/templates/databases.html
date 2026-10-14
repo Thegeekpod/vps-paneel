@@ -69,10 +69,14 @@
             <button onclick="openModal('addDbModal')" class="btn btn-primary" style="font-size: 13px; padding: 8px 16px;">
                 <span>+</span> Add Database
             </button>
-            {% if databases %}
-            <a href="/databases/{{ databases[0].db_name }}/manage" class="btn btn-primary" style="background: linear-gradient(135deg, #0284c7, #0369a1); border: none; font-weight: 700; font-size: 13px; padding: 8px 16px; text-decoration: none;">
-                <span>⚡</span> Manage Databases (Web UI)
+            {% if pma_installed %}
+            <a href="{{ pma_url }}" target="_blank" class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b, #d97706); border: none; font-weight: 700; font-size: 13px; padding: 8px 16px; text-decoration: none;">
+                <span>🔗</span> Open phpMyAdmin (:888)
             </a>
+            {% else %}
+            <button onclick="installPhpMyAdmin()" id="btnInstallPma" class="btn btn-primary" style="background: linear-gradient(135deg, #f59e0b, #d97706); border: none; font-weight: 700; font-size: 13px; padding: 8px 16px;">
+                <span>⚡</span> Install phpMyAdmin
+            </button>
             {% endif %}
             <button onclick="openModal('sqlConsoleModal')" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
                 <span>💻</span> Web SQL Console
@@ -130,9 +134,11 @@
                     <td style="color: var(--text-muted); font-size: 12px;">{{ db.note or '-' }}</td>
                     <td style="text-align: right;">
                         <div style="display: inline-flex; gap: 6px;">
-                            <a href="/databases/{{ db.db_name }}/manage" class="btn btn-primary" style="padding: 4px 10px; font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #0284c7, #0369a1); border: none; text-decoration: none;" title="Manage tables, structure, browse records and execute SQL">
-                                ⚡ Manage
+                            {% if pma_installed %}
+                            <a href="{{ pma_url }}" target="_blank" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24;" title="View database in official phpMyAdmin (:888)">
+                                🔗 phpMyAdmin
                             </a>
+                            {% endif %}
                             <button onclick="backupDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Create Backup">
                                 💾 Backup
                             </button>
@@ -570,11 +576,44 @@
         }
     }
 
-    document.getElementById("consoleQueryInput").addEventListener("keydown", function(e) {
-        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-            executeConsoleQuery();
+    const consoleInput = document.getElementById("consoleQueryInput");
+    if (consoleInput) {
+        consoleInput.addEventListener("keydown", function(e) {
+            if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+                executeConsoleQuery();
+            }
+        });
+    }
+
+    async function installPhpMyAdmin() {
+        const btn = document.getElementById("btnInstallPma");
+        if (btn) {
+            btn.disabled = true;
+            btn.innerText = "⏳ Installing phpMyAdmin (from phpmyadmin.net)...";
         }
-    });
+        showToast("Downloading official phpMyAdmin and setting up on Port 888 (takes ~15-20s)...", "info");
+
+        try {
+            const res = await fetch("/databases/install-pma", { method: "POST" });
+            const data = await res.json();
+            if (data.success) {
+                showToast("phpMyAdmin successfully installed and running on Port 888!", "success");
+                setTimeout(() => location.reload(), 1500);
+            } else {
+                showToast("Installation failed: " + (data.message || "Unknown error"), "danger");
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = "⚡ Install phpMyAdmin";
+                }
+            }
+        } catch (e) {
+            showToast("Network error: " + e, "danger");
+            if (btn) {
+                btn.disabled = false;
+                btn.innerText = "⚡ Install phpMyAdmin";
+            }
+        }
+    }
 
     document.addEventListener("DOMContentLoaded", () => {
         generateRandomPass("addDbPass");

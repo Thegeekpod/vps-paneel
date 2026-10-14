@@ -179,8 +179,117 @@ def execute_query_console(query: str, db_name: Optional[str] = None) -> Dict[str
         return {"success": True, "output": res.stdout.strip() or "Query OK (0 rows affected)"}
     except Exception as e:
         return {"success": False, "error": str(e)}
+def is_phpmyadmin_installed() -> bool:
+    pma = Path("/var/www/phpmyadmin")
+    return (pma / "index.php").exists() and (pma / "libraries").exists()
 
+def install_phpmyadmin() -> Tuple[bool, str]:
+    """Download official phpMyAdmin from phpmyadmin.net/downloads and configure on port 888."""
+    if os.name == 'nt':
+        return True, "Simulation: phpMyAdmin installed"
 
+    script = """#!/usr/bin/env bash
+set -e
+PMA_DIR="/var/www/phpmyadmin"
+
+echo "[-] Installing PHP-FPM and required extensions..."
+DEBIAN_FRONTEND=noninteractive apt-get update -y >/dev/null 2>&1 || true
+DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring php-zip php-gd php-curl php-xml curl tar gzip >/dev/null 2>&1 || true
+
+PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
+if [[ -z "$PHP_SOCK" ]]; then
+    PHP_SOCK="/run/php/php8.3-fpm.sock"
+fi
+
+echo "[-] Downloading official phpMyAdmin from files.phpmyadmin.net..."
+PMA_TAR="/tmp/phpmyadmin-download.tar.gz"
+rm -f "$PMA_TAR"
+
+curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.3/phpMyAdmin-5.2.3-all-languages.tar.gz" -o "$PMA_TAR" 2>/dev/null || \
+curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.2/phpMyAdmin-5.2.2-all-languages.tar.gz" -o "$PMA_TAR" 2>/dev/null || \
+curl -sSL "https://files.phpmyadmin.net/phpMyAdmin/5.2.1/phpMyAdmin-5.2.1-all-languages.tar.gz" -o "$PMA_TAR" 2>/dev/null
+
+if [[ ! -f "$PMA_TAR" || ! -s "$PMA_TAR" ]]; then
+    echo "ERROR: Failed to download phpMyAdmin archive" >&2
+    exit 1
+fi
+
+echo "[-] Extracting phpMyAdmin..."
+rm -rf "$PMA_DIR"
+mkdir -p "$PMA_DIR"
+tar -xzf "$PMA_TAR" -C "$PMA_DIR" --strip-components=1
+rm -f "$PMA_TAR"
+
+echo "[-] Generating config.inc.php with blowfish secret..."
+BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vpspanelblowfishsecretkey123456")
+cat > "$PMA_DIR/config.inc.php" << EOF
+<?php
+declare(strict_types=1);
+
+\$cfg['blowfish_secret'] = '${BLOWFISH}';
+
+\$i = 0;
+\$i++;
+\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
+\$cfg['Servers'][\$i]['host'] = 'localhost';
+\$cfg['Servers'][\$i]['compress'] = false;
+\$cfg['Servers'][\$i]['AllowNoPassword'] = true;
+
+\$cfg['UploadDir'] = '';
+\$cfg['SaveDir'] = '';
+\$cfg['TempDir'] = '/var/www/phpmyadmin/tmp';
+EOF
+
+mkdir -p "$PMA_DIR/tmp"
+chmod 777 "$PMA_DIR/tmp"
+
+mkdir -p /var/www/html
+ln -sfn "$PMA_DIR" /var/www/html/phpmyadmin 2>/dev/null || true
+
+chown -R www-data:www-data "$PMA_DIR" 2>/dev/null || true
+chmod -R 755 "$PMA_DIR" 2>/dev/null || true
+
+echo "[-] Configuring Nginx on Port 888..."
+cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF'
+server {
+    listen 888 default_server;
+    listen [::]:888 default_server;
+    server_name _;
+    root /var/www/phpmyadmin;
+    index index.php index.html index.htm;
+
+    client_max_body_size 256M;
+
+    location / {
+        try_files $uri $uri/ /index.php?$query_string;
+    }
+
+    location ~ \.php$ {
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+}
+EOF
+
+sed -i "s|PHP_SOCK_PLACEHOLDER|${PHP_SOCK}|g" /etc/nginx/sites-available/phpmyadmin.conf
+ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
+ufw allow 888/tcp 2>/dev/null || true
+
+nginx -t
+systemctl reload nginx || systemctl restart nginx
+"""
+    try:
+        res = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+        if res.returncode != 0:
+            return False, res.stderr or res.stdout
+        return True, "phpMyAdmin installed successfully on Port 888"
+    except Exception as e:
+        return False, str(e)
 
 def get_database_tables(db_name: str) -> List[Dict[str, Any]]:
     """Fetch tables list with engine, row count, collation and size for a database."""

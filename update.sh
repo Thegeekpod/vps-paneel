@@ -41,15 +41,20 @@ if ! command -v mysql &> /dev/null && ! command -v mariadb &> /dev/null; then
 fi
 mkdir -p /www/backup/database
 
-# Remove Adminer / external phpMyAdmin / Port 888
-echo "[-] Removing Adminer / Port 888..."
-rm -rf /var/www/phpmyadmin
-rm -rf /var/www/html/phpmyadmin
-rm -f /etc/nginx/sites-enabled/phpmyadmin.conf
-rm -f /etc/nginx/sites-available/phpmyadmin.conf
-ufw delete allow 888/tcp 2>/dev/null || true
-fuser -k 888/tcp 2>/dev/null || true
-nginx -t 2>/dev/null && (systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null) || true
+# Remove old Adminer if present (preserve official phpMyAdmin if installed)
+if [[ -f "/var/www/phpmyadmin/index.php" && ! -d "/var/www/phpmyadmin/libraries" ]]; then
+    echo "[-] Removing old Adminer..."
+    rm -rf /var/www/phpmyadmin
+    rm -rf /var/www/html/phpmyadmin
+    rm -f /etc/nginx/sites-enabled/phpmyadmin.conf
+    rm -f /etc/nginx/sites-available/phpmyadmin.conf
+    fuser -k 888/tcp 2>/dev/null || true
+    nginx -t 2>/dev/null && (systemctl reload nginx 2>/dev/null || systemctl restart nginx 2>/dev/null) || true
+fi
+
+if [[ -d "/var/www/phpmyadmin/libraries" ]]; then
+    ufw allow 888/tcp 2>/dev/null || true
+fi
 
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1 || true
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
