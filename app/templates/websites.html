@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Websites - VPS Control Panel{% endblock %}
+{% block page_title %}Website Management{% endblock %}
+
+{% block content %}
+<div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+    <div>
+        <h2 style="font-size: 18px; font-weight: 600;">Hosted Websites</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Manage domain mapping, virtual hosts, and TLS certificates</p>
+    </div>
+    <button onclick="openModal('addSiteModal')" class="btn btn-primary">
+        <span>+</span> Add Website
+    </button>
+</div>
+
+<!-- Websites Table -->
+<div class="card">
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Domain</th>
+                    <th>Document Root</th>
+                    <th>PHP</th>
+                    <th>Status</th>
+                    <th>SSL</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for site in websites %}
+                <tr>
+                    <td>
+                        <a href="http://{{ site.domain }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                            {{ site.domain }}
+                            <span style="font-size: 10px;">↗</span>
+                        </a>
+                    </td>
+                    <td><code>{{ site.root_dir }}</code></td>
+                    <td><span class="badge badge-gray">PHP {{ site.php_version }}</span></td>
+                    <td>
+                        {% if site.status == 'active' %}
+                        <span class="badge badge-success">Active</span>
+                        {% else %}
+                        <span class="badge badge-danger">Failed</span>
+                        {% endif %}
+                    </td>
+                    <td>
+                        {% if site.ssl_enabled %}
+                        <span class="badge badge-success">SSL Active</span>
+                        {% else %}
+                        <button onclick="issueSsl({{ site.id }}, '{{ site.domain }}')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;">
+                            🔒 Issue SSL
+                        </button>
+                        {% endif %}
+                    </td>
+                    <td style="text-align: right;">
+                        <div style="display: inline-flex; gap: 8px;">
+                            <a href="/file-manager?site_id={{ site.id }}" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;">
+                                📁 Files
+                            </a>
+                            <button onclick="syncVhost({{ site.id }}, '{{ site.domain }}')" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" title="Sync Nginx vhost">
+                                ⚡ Sync
+                            </button>
+                            <form method="POST" action="/websites/{{ site.id }}/delete" onsubmit="return confirm('Are you sure you want to delete website {{ site.domain }}?');" style="display: inline;">
+                                <button type="submit" class="btn btn-danger" style="padding: 4px 10px; font-size: 12px;">
+                                    🗑️
+                                </button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                        No websites created yet. Click <strong>+ Add Website</strong> to host your first site!
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Add Website Modal -->
+<div id="addSiteModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 6px;">Add New Website</h3>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Automatically provisions Nginx virtual host, web root, and default index.html</p>
+
+        <form method="POST" action="/websites/create">
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
+                <input type="text" name="domain" placeholder="example.com" required>
+                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Point your DNS A-record to this server IP first</span>
+            </div>
+
+            <div style="margin-bottom: 24px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
+                <select name="php_version">
+                    <option value="8.3" selected>PHP 8.3 FPM (Recommended)</option>
+                    <option value="8.2">PHP 8.2 FPM</option>
+                    <option value="8.4">PHP 8.4 FPM</option>
+                </select>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+                <button type="button" onclick="closeModal('addSiteModal')" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn btn-primary">Create Website</button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function issueSsl(siteId, domain) {
+    if (!confirm(`Issue automated Let's Encrypt SSL certificate for ${domain}? Make sure DNS is already pointed to this server.`)) return;
+    showToast(`Requesting SSL for ${domain}...`, 'success');
+    const res = await fetch(`/websites/${siteId}/ssl`, { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+        showToast(data.message, 'success');
+        setTimeout(() => location.reload(), 1500);
+    } else {
+        showToast(data.error || 'SSL issuance failed', 'danger');
+    }
+}
+
+async function syncVhost(siteId, domain) {
+    showToast(`Synchronizing Nginx vhost for ${domain}...`, 'success');
+    const res = await fetch(`/websites/${siteId}/sync`, { method: 'POST' });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'danger');
+}
+</script>
+{% endblock %}

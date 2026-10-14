@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - VPS Control Panel{% endblock %}
+{% block page_title %}Settings & Audit Logs{% endblock %}
+
+{% block content %}
+<div style="display: grid; grid-template-columns: 1fr 2fr; gap: 24px;">
+    <!-- Change Password -->
+    <div class="card" style="height: fit-content;">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">Administrator Security</h3>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Update master password for panel access</p>
+
+        {% if error %}
+        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 16px;">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/settings/change-password">
+            <div style="margin-bottom: 14px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Current Password</label>
+                <input type="password" name="old_password" required>
+            </div>
+            <div style="margin-bottom: 14px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">New Password</label>
+                <input type="password" name="new_password" required>
+            </div>
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Confirm New Password</label>
+                <input type="password" name="confirm_password" required>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
+                Update Password
+            </button>
+        </form>
+    </div>
+
+    <!-- Audit Logs -->
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Security & Operation Logs</h3>
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Time</th>
+                        <th>User</th>
+                        <th>Action</th>
+                        <th>Details</th>
+                        <th>IP Address</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td style="font-size: 12px;">{{ log.created_at }}</td>
+                        <td><span class="badge badge-gray">{{ log.username }}</span></td>
+                        <td><strong>{{ log.action }}</strong></td>
+                        <td style="color: var(--text-secondary); font-size: 12px;">{{ log.details }}</td>
+                        <td><code>{{ log.ip_address }}</code></td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                            No logs found.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

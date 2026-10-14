@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Services - VPS Control Panel{% endblock %}
+{% block page_title %}System Services & Firewall{% endblock %}
+
+{% block content %}
+<div style="margin-bottom: 24px;">
+    <h2 style="font-size: 18px; font-weight: 600;">Managed Daemons</h2>
+    <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Monitor and restart vital hosting server components</p>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+    {% for s in services %}
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+            <div>
+                <h3 style="font-size: 16px; font-weight: 600;">{{ s.title }}</h3>
+                <code style="font-size: 11px; color: var(--text-muted);">{{ s.name }}</code>
+            </div>
+            {% if s.is_active %}
+            <span class="badge badge-success">Running</span>
+            {% else %}
+            <span class="badge badge-danger">Stopped</span>
+            {% endif %}
+        </div>
+        <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;">{{ s.desc }}</p>
+        <div style="display: flex; gap: 8px;">
+            <button onclick="controlService('{{ s.name }}', 'restart')" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                🔄 Restart
+            </button>
+            <button onclick="controlService('{{ s.name }}', 'reload')" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                ⚡ Reload
+            </button>
+            {% if s.is_active %}
+            <button onclick="controlService('{{ s.name }}', 'stop')" class="btn btn-danger" style="font-size: 12px; padding: 6px 12px;">
+                ⏹ Stop
+            </button>
+            {% else %}
+            <button onclick="controlService('{{ s.name }}', 'start')" class="btn btn-success" style="font-size: 12px; padding: 6px 12px;">
+                ▶ Start
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endfor %}
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function controlService(name, action) {
+    showToast(`${action.toUpperCase()} ${name}...`, 'success');
+    const formData = new FormData();
+    formData.append('service_name', name);
+    formData.append('action', action);
+
+    const res = await fetch('/services/control', { method: 'POST', body: formData });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'danger');
+    setTimeout(() => location.reload(), 1500);
+}
+</script>
+{% endblock %}

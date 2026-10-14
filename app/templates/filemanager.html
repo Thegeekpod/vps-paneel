@@ -1,0 +1,331 @@
+{% extends "base.html" %}
+
+{% block title %}File Manager - VPS Control Panel{% endblock %}
+{% block page_title %}File Manager{% endblock %}
+
+{% block content %}
+<!-- Website Selector & Action Toolbar -->
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px;">
+        <!-- Left: Website Dropdown -->
+        <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 13px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase;">Website:</span>
+            <select onchange="location.href='/file-manager?site_id=' + this.value" style="width: auto; min-width: 200px;">
+                {% for site in websites %}
+                <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
+                    {{ site.domain }}
+                </option>
+                {% else %}
+                <option value="">No websites hosted yet</option>
+                {% endfor %}
+            </select>
+            {% if selected_site %}
+            <span class="badge badge-success">✓ Root Access (0755/0664)</span>
+            {% endif %}
+        </div>
+
+        <!-- Right: Actions -->
+        {% if selected_site %}
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+            <button onclick="openModal('newFileModal')" class="btn btn-primary" style="font-size: 12px; padding: 6px 12px;">
+                <span>+</span> New File
+            </button>
+            <button onclick="openModal('newFolderModal')" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                <span>📁</span> New Folder
+            </button>
+            <button onclick="document.getElementById('uploadInput').click()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                <span>⬆️</span> Upload
+            </button>
+            <input type="file" id="uploadInput" style="display: none;" onchange="handleUpload(this)">
+            <button onclick="fixPerms()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                <span>🛡️</span> Fix Permissions
+            </button>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+{% if selected_site %}
+<!-- Breadcrumbs Path Bar -->
+<div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border); border-radius: 8px; padding: 10px 16px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; font-size: 13px; font-family: monospace;">
+    <a href="/file-manager?site_id={{ selected_site.id }}" style="color: var(--accent); text-decoration: none; font-weight: 600;">root</a>
+    {% if current_path %}
+    <span>/</span>
+    <span style="color: var(--text-primary);">{{ current_path }}</span>
+    {% endif %}
+</div>
+
+<!-- Code Editor Box (Hidden by default, shown when editing) -->
+<div id="editorContainer" class="card" style="display: none; margin-bottom: 24px; border: 1px solid var(--accent); padding: 0; overflow: hidden;">
+    <div style="background: #0b1120; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 14px; font-weight: 600;" id="editorFileName">file.txt</span>
+            <span class="badge badge-gray">UTF-8</span>
+        </div>
+        <div style="display: flex; gap: 10px;">
+            <button onclick="saveCurrentFile()" class="btn btn-success" style="font-size: 12px; padding: 6px 14px;">
+                💾 Save Changes (Ctrl+S)
+            </button>
+            <button onclick="closeEditor()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px;">
+                ✕ Close
+            </button>
+        </div>
+    </div>
+    <textarea id="codeEditorArea" style="width: 100%; height: 480px; background: #070b14; color: #f8fafc; font-family: 'JetBrains Mono', Consolas, Monaco, monospace; font-size: 13px; line-height: 1.6; border: none; padding: 16px; resize: vertical; border-radius: 0;"></textarea>
+    <div style="background: #0b1120; padding: 8px 18px; font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between; border-top: 1px solid var(--border);">
+        <span>Hotkeys: Ctrl+S or Cmd+S to save instantly</span>
+        <span id="charCount">0 characters</span>
+    </div>
+</div>
+
+<!-- File Listing Table -->
+<div class="card" id="fileListCard">
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Name</th>
+                    <th>Size</th>
+                    <th>Permissions</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if current_path %}
+                <tr>
+                    <td colspan="4">
+                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ '/'.join(current_path.split('/')[:-1]) }}" style="color: var(--accent); text-decoration: none; font-weight: 600;">
+                            📁 .. (Parent Directory)
+                        </a>
+                    </td>
+                </tr>
+                {% endif %}
+
+                {% for item in items %}
+                <tr>
+                    <td>
+                        {% if item.is_dir %}
+                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ item.rel_path }}" style="color: #38bdf8; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                            📁 {{ item.name }}
+                        </a>
+                        {% else %}
+                        <span style="color: #f8fafc; font-weight: 500; display: inline-flex; align-items: center; gap: 6px;">
+                            📄 {{ item.name }}
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td>{{ item.size }}</td>
+                    <td><code>{{ item.permissions }}</code></td>
+                    <td style="text-align: right;">
+                        <div style="display: inline-flex; gap: 6px;">
+                            {% if not item.is_dir %}
+                            <button onclick="editFile('{{ item.rel_path }}', '{{ item.name }}')" class="btn btn-primary" style="padding: 3px 8px; font-size: 11px;">
+                                ✏️ Edit
+                            </button>
+                            <a href="/file-manager/download?site_id={{ selected_site.id }}&path={{ item.rel_path }}" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;">
+                                ⬇️
+                            </a>
+                            {% endif %}
+                            <button onclick="deleteItem('{{ item.rel_path }}')" class="btn btn-danger" style="padding: 3px 8px; font-size: 11px;">
+                                🗑️
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                        This directory is empty.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal: New File -->
+<div id="newFileModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Create New File</h3>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">File Name</label>
+            <input type="text" id="newFileNameInput" placeholder="index.html">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('newFileModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitNewFile()" class="btn btn-primary">Create File</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: New Folder -->
+<div id="newFolderModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Create New Folder</h3>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Folder Name</label>
+            <input type="text" id="newFolderNameInput" placeholder="assets">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('newFolderModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitNewFolder()" class="btn btn-primary">Create Folder</button>
+        </div>
+    </div>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+let currentEditingPath = null;
+const selectedSiteId = {{ selected_site.id if selected_site else 'null' }};
+const currentRelPath = "{{ current_path }}";
+
+// Hotkey: Ctrl+S / Cmd+S
+window.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'S')) {
+        e.preventDefault();
+        if (currentEditingPath) {
+            saveCurrentFile();
+        }
+    }
+});
+
+// Tab key inside editor
+const editorArea = document.getElementById('codeEditorArea');
+if (editorArea) {
+    editorArea.addEventListener('keydown', function(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            const start = this.selectionStart;
+            const end = this.selectionEnd;
+            this.value = this.value.substring(0, start) + "    " + this.value.substring(end);
+            this.selectionStart = this.selectionEnd = start + 4;
+        }
+    });
+    editorArea.addEventListener('input', function() {
+        document.getElementById('charCount').textContent = `${this.value.length} characters`;
+    });
+}
+
+async function editFile(path, name) {
+    showToast(`Loading ${name}...`, 'success');
+    const res = await fetch(`/file-manager/read?site_id=${selectedSiteId}&path=${encodeURIComponent(path)}`);
+    const data = await res.json();
+    if (data.success) {
+        currentEditingPath = path;
+        document.getElementById('editorFileName').textContent = name;
+        editorArea.value = data.content;
+        document.getElementById('charCount').textContent = `${data.content.length} characters`;
+        document.getElementById('editorContainer').style.display = 'block';
+        window.scrollTo({ top: document.getElementById('editorContainer').offsetTop - 20, behavior: 'smooth' });
+    } else {
+        showToast(data.error || 'Failed to open file', 'danger');
+    }
+}
+
+async function saveCurrentFile() {
+    if (!currentEditingPath) return;
+    const formData = new FormData();
+    formData.append('site_id', selectedSiteId);
+    formData.append('path', currentEditingPath);
+    formData.append('content', editorArea.value);
+
+    const res = await fetch('/file-manager/save', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.success) {
+        showToast(data.message, 'success');
+    } else {
+        showToast(data.error || 'Failed to save', 'danger');
+    }
+}
+
+function closeEditor() {
+    currentEditingPath = null;
+    document.getElementById('editorContainer').style.display = 'none';
+}
+
+async function submitNewFile() {
+    const filename = document.getElementById('newFileNameInput').value.trim();
+    if (!filename) return;
+    const formData = new FormData();
+    formData.append('site_id', selectedSiteId);
+    formData.append('path', currentRelPath);
+    formData.append('filename', filename);
+
+    const res = await fetch('/file-manager/create-file', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.success) {
+        showToast(data.message, 'success');
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        showToast(data.error || 'Failed to create file', 'danger');
+    }
+}
+
+async function submitNewFolder() {
+    const foldername = document.getElementById('newFolderNameInput').value.trim();
+    if (!foldername) return;
+    const formData = new FormData();
+    formData.append('site_id', selectedSiteId);
+    formData.append('path', currentRelPath);
+    formData.append('foldername', foldername);
+
+    const res = await fetch('/file-manager/create-folder', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.success) {
+        showToast(data.message, 'success');
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        showToast(data.error || 'Failed to create folder', 'danger');
+    }
+}
+
+async function deleteItem(path) {
+    if (!confirm(`Delete ${path}? This action cannot be undone.`)) return;
+    const formData = new FormData();
+    formData.append('site_id', selectedSiteId);
+    formData.append('path', path);
+
+    const res = await fetch('/file-manager/delete', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.success) {
+        showToast(data.message, 'success');
+        if (currentEditingPath === path) closeEditor();
+        setTimeout(() => location.reload(), 1000);
+    } else {
+        showToast(data.error || 'Failed to delete', 'danger');
+    }
+}
+
+async function handleUpload(input) {
+    if (!input.files || input.files.length === 0) return;
+    const file = input.files[0];
+    showToast(`Uploading ${file.name}...`, 'success');
+    const formData = new FormData();
+    formData.append('site_id', selectedSiteId);
+    formData.append('path', currentRelPath);
+    formData.append('file', file);
+
+    const res = await fetch('/file-manager/upload', { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.success) {
+        showToast(data.message, 'success');
+        setTimeout(() => location.reload(), 1200);
+    } else {
+        showToast(data.error || 'Upload failed', 'danger');
+    }
+}
+
+async function fixPerms() {
+    showToast('Normalizing file permissions...', 'success');
+    const formData = new FormData();
+    formData.append('site_id', selectedSiteId);
+
+    const res = await fetch('/file-manager/fix-permissions', { method: 'POST', body: formData });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'danger');
+}
+</script>
+{% endblock %}

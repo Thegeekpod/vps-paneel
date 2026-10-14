@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - VPS Control Panel{% endblock %}
+{% block page_title %}Server Overview & Analytics{% endblock %}
+
+{% block content %}
+<!-- Metric Cards Grid -->
+<div class="grid-4">
+    <!-- CPU Card -->
+    <div class="card">
+        <div class="card-title">CPU Utilization</div>
+        <div class="card-value">{{ stats.cpu_percent }}%</div>
+        <div class="progress-bg">
+            <div class="progress-bar" style="width: {{ stats.cpu_percent }}%;"></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+            {{ stats.cpu_count }} vCPU Cores (Load: {{ stats.load_avg }})
+        </div>
+    </div>
+
+    <!-- RAM Card -->
+    <div class="card">
+        <div class="card-title">Memory (RAM)</div>
+        <div class="card-value">{{ stats.mem_percent }}%</div>
+        <div class="progress-bg">
+            <div class="progress-bar" style="width: {{ stats.mem_percent }}%;"></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+            {{ stats.mem_used_gb }} GB / {{ stats.mem_total_gb }} GB Used
+        </div>
+    </div>
+
+    <!-- Disk Card -->
+    <div class="card">
+        <div class="card-title">Disk Storage</div>
+        <div class="card-value">{{ stats.disk_percent }}%</div>
+        <div class="progress-bg">
+            <div class="progress-bar" style="width: {{ stats.disk_percent }}%;"></div>
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 8px;">
+            {{ stats.disk_used_gb }} GB / {{ stats.disk_total_gb }} GB
+        </div>
+    </div>
+
+    <!-- Uptime Card -->
+    <div class="card">
+        <div class="card-title">System Uptime</div>
+        <div class="card-value" style="font-size: 18px; line-height: 28px;">{{ stats.uptime }}</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 14px;">
+            Hosted Websites: <strong>{{ total_sites }}</strong>
+        </div>
+    </div>
+</div>
+
+<!-- Services & Quick Actions Layout -->
+<div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px; margin-bottom: 24px;">
+    <!-- Active Services Status -->
+    <div class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 16px; font-weight: 600;">Managed Services</h3>
+            <a href="/services" class="btn btn-secondary" style="font-size: 12px; padding: 4px 10px;">Manage All</a>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+            {% for name, is_active in services.items() %}
+            <div style="display: flex; justify-content: space-between; align-items: center; padding: 12px 14px; background: rgba(15, 23, 42, 0.4); border: 1px solid var(--border); border-radius: 8px;">
+                <span style="font-size: 14px; font-weight: 500;">{{ name }}</span>
+                {% if is_active %}
+                <span class="badge badge-success">Running</span>
+                {% else %}
+                <span class="badge badge-danger">Stopped</span>
+                {% endif %}
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 16px;">Quick Actions</h3>
+        <div style="display: flex; flex-direction: column; gap: 10px;">
+            <a href="/websites" class="btn btn-primary" style="justify-content: center;">
+                <span>🌐</span> + Add Website
+            </a>
+            <a href="/file-manager" class="btn btn-secondary" style="justify-content: center;">
+                <span>📁</span> Open File Manager
+            </a>
+            <button onclick="restartNginx()" class="btn btn-secondary" style="justify-content: center;">
+                <span>⚡</span> Reload Web Server
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Logs -->
+<div class="card">
+    <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Recent System Operations</h3>
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Time</th>
+                    <th>User</th>
+                    <th>Action</th>
+                    <th>Details</th>
+                    <th>IP</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in recent_logs %}
+                <tr>
+                    <td>{{ log.created_at }}</td>
+                    <td><span class="badge badge-gray">{{ log.username }}</span></td>
+                    <td><strong>{{ log.action }}</strong></td>
+                    <td style="color: var(--text-muted);">{{ log.details }}</td>
+                    <td><code>{{ log.ip_address }}</code></td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 24px;">No operations recorded yet.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function restartNginx() {
+    const formData = new FormData();
+    formData.append('service_name', 'nginx');
+    formData.append('action', 'reload');
+    const res = await fetch('/services/control', { method: 'POST', body: formData });
+    const data = await res.json();
+    showToast(data.message, data.success ? 'success' : 'danger');
+}
+</script>
+{% endblock %}

@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}VPS Control Panel{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="brand">
+            <div class="brand-icon">⚡</div>
+            <span>VPS Panel</span>
+        </div>
+        <ul class="nav-links">
+            <li class="nav-item">
+                <a href="/" class="nav-link {% if active_nav == 'dashboard' %}active{% endif %}">
+                    <span>📊</span> Dashboard
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/websites" class="nav-link {% if active_nav == 'websites' %}active{% endif %}">
+                    <span>🌐</span> Websites
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/file-manager" class="nav-link {% if active_nav == 'filemanager' %}active{% endif %}">
+                    <span>📁</span> File Manager
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/services" class="nav-link {% if active_nav == 'services' %}active{% endif %}">
+                    <span>⚙️</span> Services
+                </a>
+            </li>
+            <li class="nav-item">
+                <a href="/settings" class="nav-link {% if active_nav == 'settings' %}active{% endif %}">
+                    <span>🛡️</span> Settings & Logs
+                </a>
+            </li>
+        </ul>
+        <div style="padding: 16px; border-top: 1px solid var(--border); font-size: 12px; color: var(--text-muted);">
+            <div>v2.0 (Python Edition)</div>
+            <div style="color: var(--success); margin-top: 4px;">● Server Online</div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <div class="main-wrapper">
+        <header class="topbar">
+            <div style="font-weight: 600; font-size: 15px; display: flex; align-items: center; gap: 8px;">
+                {% block page_title %}Dashboard{% endblock %}
+            </div>
+            <div class="topbar-right">
+                <span style="font-size: 13px; color: var(--text-secondary);">Logged in as <strong style="color: var(--text-primary);">{{ user.username }}</strong></span>
+                <a href="/logout" class="btn btn-secondary" style="padding: 6px 12px; font-size: 12px;">Sign Out</a>
+            </div>
+        </header>
+
+        <main class="content">
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+
+    <!-- Toast container -->
+    <div id="toast-container"></div>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

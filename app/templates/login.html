@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - VPS Control Panel</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <style>
+        body {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: radial-gradient(circle at top right, #1e293b, #090d16);
+            margin: 0;
+            padding: 20px;
+        }
+        .login-card {
+            background: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 16px;
+            width: 100%;
+            max-width: 400px;
+            padding: 36px 32px;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+        }
+        .login-header {
+            text-align: center;
+            margin-bottom: 28px;
+        }
+        .logo-box {
+            width: 52px;
+            height: 52px;
+            background: linear-gradient(135deg, #0284c7, #38bdf8);
+            border-radius: 12px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+            margin-bottom: 16px;
+        }
+    </style>
+</head>
+<body>
+    <div class="login-card">
+        <div class="login-header">
+            <div class="logo-box">⚡</div>
+            <h1 style="font-size: 20px; font-weight: 700; margin-bottom: 6px;">VPS Control Panel</h1>
+            <p style="font-size: 13px; color: var(--text-muted);">Sign in to manage your server</p>
+        </div>
+
+        {% if error %}
+        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px 14px; border-radius: 8px; font-size: 13px; margin-bottom: 18px;">
+            {{ error }}
+        </div>
+        {% endif %}
+
+        <form method="POST" action="/login">
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Username</label>
+                <input type="text" name="username" placeholder="admin" required autofocus>
+            </div>
+            <div style="margin-bottom: 24px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Password</label>
+                <input type="password" name="password" placeholder="••••••••" required>
+            </div>
+            <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; padding: 11px;">
+                Sign In
+            </button>
+        </form>
+        <div style="text-align: center; margin-top: 20px; font-size: 12px; color: var(--text-muted);">
+            Default credentials: admin / admin123456
+        </div>
+    </div>
+</body>
+</html>
