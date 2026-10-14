@@ -181,6 +181,7 @@ ufw allow 22/tcp 2>/dev/null || true
 ufw allow 80/tcp 2>/dev/null || true
 ufw allow 443/tcp 2>/dev/null || true
 ufw allow ${PANEL_PORT}/tcp 2>/dev/null || true
+ufw allow 888/tcp 2>/dev/null || true
 
 # ------------------------------------------------------------------------------
 # STEP 7: Completed

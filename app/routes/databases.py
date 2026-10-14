@@ -17,6 +17,8 @@ from app.services.database_service import (
     backup_db,
     restore_db,
     execute_query_console,
+    is_phpmyadmin_ready,
+    setup_phpmyadmin_service,
     BACKUP_DIR
 )
 from app.services.system_service import get_service_status
@@ -40,14 +42,27 @@ async def databases_view(request: Request, user: dict = Depends(login_required))
         db["size"] = db_sizes.get(db["db_name"], "0.00 MB")
 
     mysql_status = get_service_status("mariadb") or get_service_status("mysql")
+    server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
+    pma_ready = is_phpmyadmin_ready()
+    pma_url = f"http://{server_ip}:888"
 
     return render("databases.html", {
         "user": user,
         "databases": databases,
         "backups": backups,
         "mysql_status": mysql_status,
+        "server_ip": server_ip,
+        "pma_ready": pma_ready,
+        "pma_url": pma_url,
         "active_nav": "databases"
     }, request)
+
+@router.post("/setup-pma")
+async def setup_pma_action(request: Request, user: dict = Depends(login_required)):
+    success, msg = setup_phpmyadmin_service()
+    log_action(user["username"], "SetupPMA", f"phpMyAdmin setup status: {success}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
 
 @router.post("/create")
 async def create_database_action(
