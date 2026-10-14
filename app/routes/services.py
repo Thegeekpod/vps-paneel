@@ -1,13 +1,11 @@
 from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from pathlib import Path
 from app.auth import login_required
 from app.services.system_service import get_service_status, control_service
 from app.database import log_action
+from app.templates_util import render
 
 router = APIRouter(prefix="/services")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 SERVICE_LIST = [
     {"name": "nginx", "title": "Nginx Web Server", "desc": "High performance HTTP & reverse proxy server"},
@@ -24,12 +22,11 @@ async def services_view(request: Request, user: dict = Depends(login_required)):
             **s,
             "is_active": get_service_status(s["name"])
         })
-    return templates.TemplateResponse("services.html", {
-        "request": request,
+    return render("services.html", {
         "user": user,
         "services": services,
         "active_nav": "services"
-    })
+    }, request)
 
 @router.post("/control")
 async def service_control(

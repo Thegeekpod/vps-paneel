@@ -1,12 +1,10 @@
 from fastapi import APIRouter, Request, Depends, Form
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
-from pathlib import Path
 from app.auth import login_required
 from app.database import get_db, hash_password, log_action
+from app.templates_util import render
 
 router = APIRouter(prefix="/settings")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 @router.get("", response_class=HTMLResponse)
 async def settings_view(request: Request, user: dict = Depends(login_required)):
@@ -16,12 +14,11 @@ async def settings_view(request: Request, user: dict = Depends(login_required)):
     logs = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
-    return templates.TemplateResponse("settings.html", {
-        "request": request,
+    return render("settings.html", {
         "user": user,
         "logs": logs,
         "active_nav": "settings"
-    })
+    }, request)
 
 @router.post("/change-password")
 async def change_password(
@@ -32,9 +29,9 @@ async def change_password(
     user: dict = Depends(login_required)
 ):
     if new_password != confirm_password:
-        return templates.TemplateResponse("settings.html", {
-            "request": request, "user": user, "error": "New passwords do not match", "active_nav": "settings"
-        })
+        return render("settings.html", {
+            "user": user, "error": "New passwords do not match", "active_nav": "settings"
+        }, request)
 
     conn = get_db()
     cursor = conn.cursor()
@@ -43,9 +40,9 @@ async def change_password(
     
     if not row or row["password_hash"] != hash_password(old_password):
         conn.close()
-        return templates.TemplateResponse("settings.html", {
-            "request": request, "user": user, "error": "Current password incorrect", "active_nav": "settings"
-        })
+        return render("settings.html", {
+            "user": user, "error": "Current password incorrect", "active_nav": "settings"
+        }, request)
 
     cursor.execute("UPDATE users SET password_hash = ? WHERE username = ?",
                    (hash_password(new_password), user["username"]))

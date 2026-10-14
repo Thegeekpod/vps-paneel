@@ -9,17 +9,15 @@ from app.config import BASE_DIR, PANEL_PORT
 from app.database import init_db, get_db, hash_password, log_action
 from app.auth import create_access_token, get_current_user, COOKIE_NAME
 from app.services.nginx_service import ensure_default_catchall
+from app.templates_util import render
 from app.routes import dashboard, websites, filemanager, services, settings
 
 app = FastAPI(title="VPS Control Panel", docs_url=None, redoc_url=None)
 
-# Static and Templates
+# Static files
 STATIC_DIR = Path(__file__).parent / "static"
 STATIC_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-TEMPLATES_DIR = Path(__file__).parent / "templates"
-templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 
 # Include Routers
 app.include_router(dashboard.router)
@@ -38,7 +36,7 @@ async def login_view(request: Request):
     user = get_current_user(request)
     if user:
         return RedirectResponse(url="/", status_code=303)
-    return templates.TemplateResponse("login.html", {"request": request, "error": None})
+    return render("login.html", {"error": None}, request)
 
 @app.post("/login")
 async def login_action(
@@ -53,10 +51,7 @@ async def login_action(
     conn.close()
 
     if not user or user["password_hash"] != hash_password(password):
-        return templates.TemplateResponse("login.html", {
-            "request": request,
-            "error": "Invalid username or password"
-        }, status_code=400)
+        return render("login.html", {"error": "Invalid username or password"}, request, status_code=400)
 
     token = create_access_token(user["username"], user["role"])
     log_action(user["username"], "Login", "Successful web login", request.client.host)

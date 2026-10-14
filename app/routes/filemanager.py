@@ -4,13 +4,9 @@ from pathlib import Path
 from typing import Optional
 from fastapi import APIRouter, Request, Depends, Form, UploadFile, File, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
-from fastapi.templating import Jinja2Templates
-from app.auth import login_required
-from app.config import WEB_ROOT
-from app.database import get_db, log_action
+from app.templates_util import render
 
 router = APIRouter(prefix="/file-manager")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 def format_bytes(size: int) -> str:
     if size >= 1048576:
@@ -70,15 +66,14 @@ async def file_manager_view(
             except Exception:
                 continue
 
-    return templates.TemplateResponse("filemanager.html", {
-        "request": request,
+    return render("filemanager.html", {
         "user": user,
         "websites": websites,
         "selected_site": selected_site,
         "current_path": path.strip("/"),
         "items": items,
         "active_nav": "filemanager"
-    })
+    }, request)
 
 @router.get("/read")
 async def read_file(

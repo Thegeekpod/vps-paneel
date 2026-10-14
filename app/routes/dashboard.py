@@ -1,13 +1,11 @@
 from fastapi import APIRouter, Request, Depends
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
-from pathlib import Path
 from app.auth import login_required
 from app.services.system_service import get_system_stats, get_service_status
 from app.database import get_db
+from app.templates_util import render
 
 router = APIRouter()
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 @router.get("/", response_class=HTMLResponse)
 async def dashboard_view(request: Request, user: dict = Depends(login_required)):
@@ -29,15 +27,14 @@ async def dashboard_view(request: Request, user: dict = Depends(login_required))
     recent_logs = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
-    return templates.TemplateResponse("dashboard.html", {
-        "request": request,
+    return render("dashboard.html", {
         "user": user,
         "stats": stats,
         "services": services,
         "total_sites": total_sites,
         "recent_logs": recent_logs,
         "active_nav": "dashboard"
-    })
+    }, request)
 
 @router.get("/api/stats")
 async def api_stats(user: dict = Depends(login_required)):

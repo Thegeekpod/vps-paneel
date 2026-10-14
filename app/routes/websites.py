@@ -1,17 +1,13 @@
-import os
-import shutil
-from pathlib import Path
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
-from fastapi.templating import Jinja2Templates
 from app.auth import login_required
 from app.config import WEB_ROOT
 from app.database import get_db, log_action
 from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx
 from app.services.ssl_service import issue_ssl
+from app.templates_util import render
 
 router = APIRouter(prefix="/websites")
-templates = Jinja2Templates(directory=str(Path(__file__).parent.parent / "templates"))
 
 @router.get("", response_class=HTMLResponse)
 async def list_websites(request: Request, user: dict = Depends(login_required)):
@@ -21,12 +17,11 @@ async def list_websites(request: Request, user: dict = Depends(login_required)):
     websites = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
-    return templates.TemplateResponse("websites.html", {
-        "request": request,
+    return render("websites.html", {
         "user": user,
         "websites": websites,
         "active_nav": "websites"
-    })
+    }, request)
 
 @router.post("/create")
 async def create_website_action(
