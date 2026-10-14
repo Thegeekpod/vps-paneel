@@ -37,6 +37,7 @@ systemctl daemon-reload
 # Kill any lingering background processes from previous setups
 pkill -9 -f "php artisan" 2>/dev/null || true
 pkill -9 -f "vps-agent" 2>/dev/null || true
+fuser -k 8443/tcp 2>/dev/null || true
 
 # Remove old sudoers and binaries
 rm -f /etc/sudoers.d/vps-panel-agent
@@ -167,6 +168,7 @@ EOF
 
 systemctl daemon-reload
 systemctl enable vps-panel
+fuser -k 8443/tcp 2>/dev/null || true
 systemctl restart vps-panel
 
 # ------------------------------------------------------------------------------
@@ -181,17 +183,24 @@ ufw allow ${PANEL_PORT}/tcp 2>/dev/null || true
 # ------------------------------------------------------------------------------
 # STEP 7: Completed
 # ------------------------------------------------------------------------------
-SERVER_IP=$(curl -s -4 ifconfig.me || curl -s icanhazip.com || echo "YOUR_SERVER_IP")
+sleep 2
+SERVER_IP=$(curl -s -4 ifconfig.me || curl -s icanhazip.com || echo "97.74.84.87")
 
 echo ""
 echo "=============================================================================="
-echo " [SUCCESS] VPS Control Panel Installed Freshly & Running!"
+if systemctl is-active --quiet vps-panel; then
+    echo " [SUCCESS] VPS Control Panel Installed Freshly & Running!"
+else
+    echo " [WARNING] Service starting up. Checking logs:"
+    journalctl -u vps-panel -n 20 --no-pager
+fi
 echo "=============================================================================="
 echo ""
-echo " Panel URL:      http://${SERVER_IP}:${PANEL_PORT}"
+echo " Panel URL:      http://${SERVER_IP}:${PANEL_PORT}/login"
 echo " Username:       admin"
 echo " Password:       admin123456"
 echo ""
 echo " Web Root:       /www/wwwroot"
 echo " Service Status: systemctl status vps-panel"
 echo "=============================================================================="
+
