@@ -32,6 +32,14 @@ if [[ ! -f "$INSTALL_DIR/venv/bin/python3" ]]; then
     DEBIAN_FRONTEND=noninteractive apt-get install -y python3-venv python3-pip >/dev/null 2>&1 || true
     python3 -m venv "$INSTALL_DIR/venv"
 fi
+if ! command -v mysql &> /dev/null && ! command -v mariadb &> /dev/null; then
+    echo "[-] Installing MariaDB Server for Database Management..."
+    apt-get update -y >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y mariadb-server >/dev/null 2>&1 || true
+    systemctl enable mariadb 2>/dev/null || true
+    systemctl start mariadb 2>/dev/null || true
+fi
+mkdir -p /www/backup/database
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1 || true
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 

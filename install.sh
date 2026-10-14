@@ -71,7 +71,8 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     python3-certbot-nginx \
     curl \
     git \
-    ufw
+    ufw \
+    mariadb-server
 
 # ------------------------------------------------------------------------------
 # STEP 2: Directory Structure

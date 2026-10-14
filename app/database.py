@@ -55,6 +55,32 @@ def init_db():
     )
     ''')
 
+    # Databases Table (MariaDB/MySQL metadata)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS databases (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        db_name TEXT UNIQUE NOT NULL,
+        db_user TEXT NOT NULL,
+        db_pass TEXT NOT NULL,
+        db_host TEXT DEFAULT '127.0.0.1',
+        charset TEXT DEFAULT 'utf8mb4',
+        note TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    # Database Backups Table
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS db_backups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        db_name TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        size_bytes INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
     # Default admin user if none exists
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:

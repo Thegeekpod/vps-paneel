@@ -1,0 +1,575 @@
+{% extends "base.html" %}
+
+{% block title %}Databases - VPS Control Panel{% endblock %}
+{% block page_title %}Database Management{% endblock %}
+
+{% block head %}
+<style>
+    .pass-field {
+        font-family: monospace;
+        letter-spacing: 0.05em;
+        background: #0f172a;
+        padding: 4px 8px;
+        border-radius: 6px;
+        border: 1px solid var(--border);
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+    .sql-console {
+        background: #080c14;
+        color: #38bdf8;
+        font-family: 'JetBrains Mono', Consolas, Monaco, monospace;
+        font-size: 13px;
+        padding: 14px;
+        border-radius: 8px;
+        border: 1px solid var(--border);
+        white-space: pre-wrap;
+        max-height: 340px;
+        overflow-y: auto;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Overview Stats -->
+<div class="grid-4" style="margin-bottom: 20px;">
+    <div class="card">
+        <div class="card-title">Total Databases</div>
+        <div class="card-value" style="color: var(--accent);">{{ databases|length }}</div>
+        <div style="font-size: 12px; color: var(--text-muted);">MariaDB / MySQL</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Database Service</div>
+        <div class="card-value">
+            {% if mysql_status %}
+            <span style="color: var(--success); font-size: 20px;">● Running</span>
+            {% else %}
+            <span style="color: var(--danger); font-size: 20px;">● Stopped</span>
+            {% endif %}
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted);">Port 3306 (Localhost)</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Database Backups</div>
+        <div class="card-value" style="color: #c084fc;">{{ backups|length }}</div>
+        <div style="font-size: 12px; color: var(--text-muted);">Stored in /www/backup/database</div>
+    </div>
+    <div class="card">
+        <div class="card-title">Default Collation</div>
+        <div class="card-value" style="font-size: 20px; color: #fbbf24;">utf8mb4</div>
+        <div style="font-size: 12px; color: var(--text-muted);">Full Emoji & Multilingual</div>
+    </div>
+</div>
+
+<!-- Action Toolbar -->
+<div class="card" style="margin-bottom: 20px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button onclick="openModal('addDbModal')" class="btn btn-primary" style="font-size: 13px; padding: 8px 16px;">
+                <span>+</span> Add Database
+            </button>
+            <button onclick="openModal('sqlConsoleModal')" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
+                <span>💻</span> Web SQL Console
+            </button>
+            <button onclick="openModal('backupManagerModal')" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
+                <span>💾</span> Backup History ({{ backups|length }})
+            </button>
+        </div>
+        <div style="font-size: 13px; color: var(--text-muted);">
+            Connect locally using host <code>127.0.0.1</code> or <code>localhost</code>
+        </div>
+    </div>
+</div>
+
+<!-- Database Table -->
+<div class="card">
+    <div style="font-weight: 700; font-size: 15px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between;">
+        <span>🗄️ Managed Databases</span>
+        <span class="badge badge-gray">{{ databases|length }} Databases Registered</span>
+    </div>
+
+    <div class="table-responsive">
+        <table>
+            <thead>
+                <tr>
+                    <th>Database Name</th>
+                    <th>User</th>
+                    <th>Password</th>
+                    <th>Size</th>
+                    <th>Host</th>
+                    <th>Charset</th>
+                    <th>Note</th>
+                    <th style="text-align: right;">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for db in databases %}
+                <tr>
+                    <td>
+                        <strong style="color: var(--accent); font-family: monospace; font-size: 14px;">{{ db.db_name }}</strong>
+                    </td>
+                    <td>
+                        <code style="color: #fff;">{{ db.db_user }}</code>
+                    </td>
+                    <td>
+                        <div class="pass-field">
+                            <span id="pass-{{ db.id }}" data-pass="{{ db.db_pass }}">••••••••</span>
+                            <button onclick="togglePasswordVisibility({{ db.id }})" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px;" title="Show/Hide">👁️</button>
+                            <button onclick="copyToClipboard('{{ db.db_pass }}')" style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:12px;" title="Copy">📋</button>
+                        </div>
+                    </td>
+                    <td><span class="badge badge-info">{{ db.size }}</span></td>
+                    <td><code>{{ db.db_host }}</code></td>
+                    <td><span class="badge badge-gray">{{ db.charset }}</span></td>
+                    <td style="color: var(--text-muted); font-size: 12px;">{{ db.note or '-' }}</td>
+                    <td style="text-align: right;">
+                        <div style="display: inline-flex; gap: 6px;">
+                            <button onclick="backupDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Create Backup">
+                                💾 Backup
+                            </button>
+                            <button onclick="openImportModal({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Import SQL File">
+                                ⬆️ Import
+                            </button>
+                            <button onclick="openChangePassModal({{ db.id }}, '{{ db.db_user }}')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Change Password">
+                                🔑
+                            </button>
+                            <button onclick="deleteDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-danger" style="padding: 4px 8px; font-size: 11px;" title="Delete Database">
+                                🗑️
+                            </button>
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                        <div style="font-size: 32px; margin-bottom: 8px;">🗄️</div>
+                        <div>No databases created yet.</div>
+                        <div style="font-size: 12px; margin-top: 6px;">Click <strong>+ Add Database</strong> to create a new MySQL database and user.</div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Modal: Add Database -->
+<div id="addDbModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 520px;">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 16px;">Add New MySQL Database</h3>
+        
+        <div style="margin-bottom: 14px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Database Name</label>
+            <input type="text" id="addDbName" placeholder="my_site_db" onkeyup="autoFillUsername(this.value)">
+        </div>
+
+        <div style="margin-bottom: 14px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Database User</label>
+            <input type="text" id="addDbUser" placeholder="my_site_user">
+        </div>
+
+        <div style="margin-bottom: 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="font-size: 12px; color: var(--text-secondary);">Password</label>
+                <button type="button" onclick="generateRandomPass('addDbPass')" style="background: none; border: none; color: var(--accent); font-size: 12px; cursor: pointer; font-weight: 600;">
+                    🎲 Generate Password
+                </button>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <input type="text" id="addDbPass" placeholder="Strong password">
+                <button type="button" onclick="copyToClipboard(document.getElementById('addDbPass').value)" class="btn btn-secondary" style="padding: 0 12px;">📋</button>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+            <div>
+                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Access Permission</label>
+                <select id="addDbHost">
+                    <option value="127.0.0.1" selected>Localhost (127.0.0.1)</option>
+                    <option value="%">Everyone (%) - Remote</option>
+                </select>
+            </div>
+            <div>
+                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Character Set</label>
+                <select id="addDbCharset">
+                    <option value="utf8mb4" selected>utf8mb4 (Recommended)</option>
+                    <option value="utf8">utf8</option>
+                </select>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 18px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Note / Description (Optional)</label>
+            <input type="text" id="addDbNote" placeholder="e.g. WordPress main database">
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('addDbModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitAddDatabase()" class="btn btn-primary">Create Database</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Change Password -->
+<div id="changePassModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Change Database Password</h3>
+        <input type="hidden" id="changePassDbId">
+        <div style="margin-bottom: 12px; font-size: 13px; color: var(--text-secondary);">
+            Changing password for user: <strong id="changePassUsername" style="color: #fff;"></strong>
+        </div>
+        <div style="margin-bottom: 16px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                <label style="font-size: 12px; color: var(--text-secondary);">New Password</label>
+                <button type="button" onclick="generateRandomPass('newDbPassInput')" style="background: none; border: none; color: var(--accent); font-size: 12px; cursor: pointer; font-weight: 600;">
+                    🎲 Generate
+                </button>
+            </div>
+            <div style="display: flex; gap: 8px;">
+                <input type="text" id="newDbPassInput" placeholder="New strong password">
+                <button type="button" onclick="copyToClipboard(document.getElementById('newDbPassInput').value)" class="btn btn-secondary" style="padding: 0 12px;">📋</button>
+            </div>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('changePassModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitChangePassword()" class="btn btn-primary">Update Password</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Import SQL File -->
+<div id="importSqlModal" class="modal-overlay">
+    <div class="modal-box">
+        <h3 style="font-size: 16px; font-weight: 700; margin-bottom: 14px;">Import SQL File</h3>
+        <input type="hidden" id="importDbId">
+        <div style="margin-bottom: 14px; font-size: 13px; color: var(--text-secondary);">
+            Target Database: <strong id="importDbNameText" style="color: var(--accent);"></strong>
+        </div>
+        <div style="margin-bottom: 18px;">
+            <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px;">Choose .sql file</label>
+            <input type="file" id="importSqlFileInput" accept=".sql">
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button onclick="closeModal('importSqlModal')" class="btn btn-secondary">Cancel</button>
+            <button onclick="submitImportSql()" class="btn btn-success">Import Now</button>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: Web SQL Console -->
+<div id="sqlConsoleModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 750px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <h3 style="font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                <span>💻</span> Interactive Web SQL Console
+            </h3>
+            <button onclick="closeModal('sqlConsoleModal')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;">✕</button>
+        </div>
+
+        <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <select id="consoleDbSelect" style="width: 220px;">
+                <option value="">(No database selected)</option>
+                {% for db in databases %}
+                <option value="{{ db.db_name }}">{{ db.db_name }}</option>
+                {% endfor %}
+            </select>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button type="button" onclick="setConsoleQuery('SHOW DATABASES;')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">SHOW DATABASES</button>
+                <button type="button" onclick="setConsoleQuery('SHOW TABLES;')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">SHOW TABLES</button>
+                <button type="button" onclick="setConsoleQuery('SHOW PROCESSLIST;')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">PROCESSLIST</button>
+                <button type="button" onclick="setConsoleQuery('SELECT VERSION();')" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;">VERSION</button>
+            </div>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+            <textarea id="consoleQueryInput" rows="4" placeholder="Enter SQL query here (e.g. SHOW TABLES;)&#10;Press Ctrl+Enter to execute" style="font-family: monospace;"></textarea>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <span style="font-size: 11px; color: var(--text-muted);">Hotkeys: Ctrl+Enter to run</span>
+            <button onclick="executeConsoleQuery()" class="btn btn-primary" style="padding: 6px 16px; font-size: 12px;">
+                ⚡ Run Query
+            </button>
+        </div>
+
+        <div style="font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 6px;">OUTPUT:</div>
+        <div id="consoleOutput" class="sql-console">Ready to run query...</div>
+    </div>
+</div>
+
+<!-- Modal: Backup History Manager -->
+<div id="backupManagerModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 680px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="font-size: 16px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                <span>💾</span> Database Backups
+            </h3>
+            <button onclick="closeModal('backupManagerModal')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;">✕</button>
+        </div>
+
+        <div class="table-responsive" style="max-height: 380px; overflow-y: auto;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Database</th>
+                        <th>File</th>
+                        <th>Date</th>
+                        <th style="text-align: right;">Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for b in backups %}
+                    <tr>
+                        <td><strong style="color: var(--accent);">{{ b.db_name }}</strong></td>
+                        <td style="font-size: 12px; font-family: monospace;">{{ b.filename }}</td>
+                        <td style="font-size: 12px; color: var(--text-muted);">{{ b.created_at }}</td>
+                        <td style="text-align: right;">
+                            <div style="display: inline-flex; gap: 4px;">
+                                <a href="/databases/backups/{{ b.id }}/download" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" title="Download">⬇️</a>
+                                <button onclick="restoreBackup({{ b.id }}, '{{ b.db_name }}')" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" title="Restore">🔄</button>
+                                <button onclick="deleteBackup({{ b.id }})" class="btn btn-danger" style="padding: 3px 8px; font-size: 11px;" title="Delete">🗑️</button>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px;">
+                            No backups found. Click <strong>💾 Backup</strong> next to any database to create a mysqldump backup.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<script>
+    function autoFillUsername(val) {
+        const clean = val.replace(/[^a-zA-Z0-9_]/g, '');
+        document.getElementById("addDbUser").value = clean ? clean + "_user" : "";
+    }
+
+    function generateRandomPass(targetInputId) {
+        const chars = "abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789!@#$%&*";
+        let pass = "";
+        for (let i = 0; i < 16; i++) {
+            pass += chars.charAt(Math.floor(Math.random() * chars.length));
+        }
+        document.getElementById(targetInputId).value = pass;
+    }
+
+    function copyToClipboard(text) {
+        if (!text) return;
+        navigator.clipboard.writeText(text);
+        showToast("Copied to clipboard!", "success");
+    }
+
+    function togglePasswordVisibility(id) {
+        const el = document.getElementById(`pass-${id}`);
+        if (!el) return;
+        if (el.innerText === "••••••••") {
+            el.innerText = el.getAttribute("data-pass");
+        } else {
+            el.innerText = "••••••••";
+        }
+    }
+
+    // Add Database
+    async function submitAddDatabase() {
+        const name = document.getElementById("addDbName").value.trim();
+        const user = document.getElementById("addDbUser").value.trim();
+        const pass = document.getElementById("addDbPass").value.trim();
+        const host = document.getElementById("addDbHost").value;
+        const charset = document.getElementById("addDbCharset").value;
+        const note = document.getElementById("addDbNote").value.trim();
+
+        if (!name || !user || !pass) {
+            showToast("Please fill in Database Name, User, and Password.", "danger");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("db_name", name);
+        formData.append("db_user", user);
+        formData.append("db_pass", pass);
+        formData.append("db_host", host);
+        formData.append("charset", charset);
+        formData.append("note", note);
+
+        showToast("Creating database and user...", "success");
+        try {
+            const res = await fetch("/databases/create", { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, "success");
+                setTimeout(() => location.reload(), 600);
+            } else {
+                showToast(data.error || "Creation failed", "danger");
+            }
+        } catch (e) {
+            showToast("Error creating database: " + e, "danger");
+        }
+    }
+
+    // Delete Database
+    async function deleteDatabase(id, name) {
+        if (!confirm(`Are you sure you want to permanently delete database '${name}' and its user? All data will be lost!`)) return;
+
+        showToast("Dropping database...", "success");
+        try {
+            const res = await fetch(`/databases/${id}/delete`, { method: "POST" });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, "success");
+                setTimeout(() => location.reload(), 600);
+            } else {
+                showToast(data.error || "Delete failed", "danger");
+            }
+        } catch (e) {
+            showToast("Delete error: " + e, "danger");
+        }
+    }
+
+    // Change Password
+    function openChangePassModal(id, username) {
+        document.getElementById("changePassDbId").value = id;
+        document.getElementById("changePassUsername").innerText = username;
+        generateRandomPass("newDbPassInput");
+        openModal("changePassModal");
+    }
+
+    async function submitChangePassword() {
+        const id = document.getElementById("changePassDbId").value;
+        const newPass = document.getElementById("newDbPassInput").value.trim();
+        if (!newPass) return;
+
+        const formData = new FormData();
+        formData.append("new_password", newPass);
+
+        showToast("Updating password...", "success");
+        const res = await fetch(`/databases/${id}/change-password`, { method: "POST", body: formData });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, "success");
+            setTimeout(() => location.reload(), 600);
+        } else {
+            showToast(data.error || "Failed", "danger");
+        }
+    }
+
+    // Backup
+    async function backupDatabase(id, name) {
+        showToast(`Backing up '${name}'...`, "success");
+        try {
+            const res = await fetch(`/databases/${id}/backup`, { method: "POST" });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, "success");
+                setTimeout(() => location.reload(), 600);
+            } else {
+                showToast(data.error || "Backup failed", "danger");
+            }
+        } catch (e) {
+            showToast("Backup error: " + e, "danger");
+        }
+    }
+
+    // Import SQL
+    function openImportModal(id, name) {
+        document.getElementById("importDbId").value = id;
+        document.getElementById("importDbNameText").innerText = name;
+        openModal("importSqlModal");
+    }
+
+    async function submitImportSql() {
+        const id = document.getElementById("importDbId").value;
+        const fileInput = document.getElementById("importSqlFileInput");
+        if (!fileInput.files || fileInput.files.length === 0) {
+            showToast("Please select a .sql file", "danger");
+            return;
+        }
+
+        const formData = new FormData();
+        formData.append("sql_file", fileInput.files[0]);
+
+        showToast("Importing SQL file into database...", "success");
+        try {
+            const res = await fetch(`/databases/${id}/import-sql`, { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.success) {
+                showToast(data.message, "success");
+                closeModal("importSqlModal");
+            } else {
+                showToast(data.error || "Import failed", "danger");
+            }
+        } catch (e) {
+            showToast("Import error: " + e, "danger");
+        }
+    }
+
+    // Restore Backup
+    async function restoreBackup(id, dbName) {
+        if (!confirm(`Restore database '${dbName}' from this backup? Current data will be replaced.`)) return;
+        showToast("Restoring database...", "success");
+        const res = await fetch(`/databases/backups/${id}/restore`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, "success");
+        } else {
+            showToast(data.error || "Restore failed", "danger");
+        }
+    }
+
+    async function deleteBackup(id) {
+        if (!confirm("Delete this backup file?")) return;
+        const res = await fetch(`/databases/backups/${id}/delete`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast("Backup deleted", "success");
+            setTimeout(() => location.reload(), 400);
+        }
+    }
+
+    // Web SQL Console
+    function setConsoleQuery(q) {
+        document.getElementById("consoleQueryInput").value = q;
+    }
+
+    async function executeConsoleQuery() {
+        const query = document.getElementById("consoleQueryInput").value.trim();
+        const dbName = document.getElementById("consoleDbSelect").value;
+        const outEl = document.getElementById("consoleOutput");
+
+        if (!query) return;
+        outEl.innerText = "Executing query...";
+
+        const formData = new FormData();
+        formData.append("query", query);
+        if (dbName) formData.append("db_name", dbName);
+
+        try {
+            const res = await fetch("/databases/query", { method: "POST", body: formData });
+            const data = await res.json();
+            if (data.success) {
+                outEl.innerText = data.output;
+            } else {
+                outEl.innerText = "ERROR:\n" + (data.error || "Query failed");
+            }
+        } catch (e) {
+            outEl.innerText = "Network error: " + e;
+        }
+    }
+
+    document.getElementById("consoleQueryInput").addEventListener("keydown", function(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            executeConsoleQuery();
+        }
+    });
+
+    document.addEventListener("DOMContentLoaded", () => {
+        generateRandomPass("addDbPass");
+    });
+</script>
+{% endblock %}
