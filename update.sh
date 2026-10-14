@@ -59,6 +59,18 @@ fi
 "$INSTALL_DIR/venv/bin/pip" install --upgrade pip >/dev/null 2>&1 || true
 "$INSTALL_DIR/venv/bin/pip" install -r "$INSTALL_DIR/requirements.txt"
 
+echo "[-] Syncing database user privileges (localhost & 127.0.0.1) and phpMyAdmin signon..."
+"$INSTALL_DIR/venv/bin/python3" -c "
+import sys
+sys.path.insert(0, '${INSTALL_DIR}')
+try:
+    from app.services.database_service import sync_database_accounts
+    sync_database_accounts()
+    print('[OK] Database privileges and phpMyAdmin signon synchronized.')
+except Exception as e:
+    print('[WARNING] Database sync warning:', e)
+"
+
 echo "[-] 4/6 Cleaning conflicting port 8443 and old configurations..."
 rm -f /etc/nginx/sites-enabled/vps-panel.conf
 rm -f /etc/nginx/sites-available/vps-panel.conf

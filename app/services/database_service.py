@@ -2,9 +2,13 @@ import os
 import re
 import shutil
 import subprocess
+import secrets
+import logging
 from pathlib import Path
 from datetime import datetime
 from typing import Tuple, List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 BACKUP_DIR = Path("/www/backup/database")
 BACKUP_DIR.mkdir(parents=True, exist_ok=True)
@@ -75,19 +79,24 @@ def create_db_and_user(
     
     sql = f"""
     CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET {charset} COLLATE {collate};
-    CREATE USER IF NOT EXISTS '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}';
-    GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'{db_host}';
-    FLUSH PRIVILEGES;
+
+    CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}';
+    ALTER USER '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}';
+    GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'localhost';
+
+    CREATE USER IF NOT EXISTS '{db_user}'@'127.0.0.1' IDENTIFIED BY '{escaped_pass}';
+    ALTER USER '{db_user}'@'127.0.0.1' IDENTIFIED BY '{escaped_pass}';
+    GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'127.0.0.1';
     """
     
-    # If host is not localhost, also grant for localhost to allow local web apps (like WordPress/Laravel)
     if db_host not in ["127.0.0.1", "localhost"]:
         sql += f"""
-        CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}';
-        GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'localhost';
-        FLUSH PRIVILEGES;
+        CREATE USER IF NOT EXISTS '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}';
+        ALTER USER '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}';
+        GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'{db_host}';
         """
 
+    sql += "FLUSH PRIVILEGES;"
     return run_mysql_command(sql)
 
 def drop_db_and_user(db_name: str, db_user: Optional[str] = None, db_host: str = "127.0.0.1") -> Tuple[bool, str]:
@@ -96,9 +105,12 @@ def drop_db_and_user(db_name: str, db_user: Optional[str] = None, db_host: str =
 
     sql = f"DROP DATABASE IF EXISTS `{db_name}`;"
     if db_user and re.match(r'^[a-zA-Z0-9_]+$', db_user):
-        sql += f"DROP USER IF EXISTS '{db_user}'@'{db_host}';"
-        if db_host != 'localhost':
-            sql += f"DROP USER IF EXISTS '{db_user}'@'localhost';"
+        sql += f"""
+        DROP USER IF EXISTS '{db_user}'@'localhost';
+        DROP USER IF EXISTS '{db_user}'@'127.0.0.1';
+        """
+        if db_host not in ["127.0.0.1", "localhost"]:
+            sql += f"DROP USER IF EXISTS '{db_user}'@'{db_host}';"
     sql += "FLUSH PRIVILEGES;"
 
     return run_mysql_command(sql)
@@ -108,9 +120,13 @@ def change_db_password(db_user: str, new_pass: str, db_host: str = "127.0.0.1") 
         return False, "Invalid username"
 
     escaped_pass = new_pass.replace("'", "\\'")
-    sql = f"ALTER USER '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}'; FLUSH PRIVILEGES;"
-    if db_host != 'localhost':
-        sql += f"ALTER USER '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}'; FLUSH PRIVILEGES;"
+    sql = f"""
+    ALTER USER '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}';
+    ALTER USER '{db_user}'@'127.0.0.1' IDENTIFIED BY '{escaped_pass}';
+    """
+    if db_host not in ["127.0.0.1", "localhost"]:
+        sql += f"ALTER USER '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}';"
+    sql += "FLUSH PRIVILEGES;"
 
     return run_mysql_command(sql)
 
@@ -220,7 +236,7 @@ mkdir -p "$PMA_DIR"
 tar -xzf "$PMA_TAR" -C "$PMA_DIR" --strip-components=1
 rm -f "$PMA_TAR"
 
-echo "[-] Generating config.inc.php with blowfish secret..."
+echo "[-] Generating config.inc.php with blowfish secret & signon auto-login..."
 BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vpspanelblowfishsecretkey123456")
 cat > "$PMA_DIR/config.inc.php" << EOF
 <?php
@@ -230,15 +246,117 @@ declare(strict_types=1);
 
 \$i = 0;
 \$i++;
-\$cfg['Servers'][\$i]['auth_type'] = 'cookie';
-\$cfg['Servers'][\$i]['host'] = 'localhost';
+\$cfg['Servers'][\$i]['auth_type'] = 'signon';
+\$cfg['Servers'][\$i]['host'] = '127.0.0.1';
+\$cfg['Servers'][\$i]['port'] = 3306;
+\$cfg['Servers'][\$i]['connect_type'] = 'tcp';
 \$cfg['Servers'][\$i]['compress'] = false;
 \$cfg['Servers'][\$i]['AllowNoPassword'] = true;
+\$cfg['Servers'][\$i]['SignonSession'] = 'PmaSignon';
+\$cfg['Servers'][\$i]['SignonURL'] = 'signon.php';
+\$cfg['Servers'][\$i]['SignonLogoutURL'] = 'signon.php?logout=1';
 
 \$cfg['UploadDir'] = '';
 \$cfg['SaveDir'] = '';
 \$cfg['TempDir'] = '/var/www/phpmyadmin/tmp';
 EOF
+
+# Create signon.php for one-click auto login and direct login
+cat > "$PMA_DIR/signon.php" << 'EOF_SIGNON'
+<?php
+declare(strict_types=1);
+
+ini_set('session.use_cookies', '1');
+ini_set('session.use_only_cookies', '1');
+session_name('PmaSignon');
+@session_start();
+
+if (isset($_GET['logout'])) {
+    $_SESSION = [];
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    @session_destroy();
+    header('Location: signon.php');
+    exit;
+}
+
+$user = $_REQUEST['user'] ?? '';
+$pass = $_REQUEST['password'] ?? '';
+$host = $_REQUEST['host'] ?? '127.0.0.1';
+$port = (int)($_REQUEST['port'] ?? 3306);
+$db   = $_REQUEST['db'] ?? '';
+
+if (!empty($user)) {
+    $_SESSION = [];
+    $_SESSION['PMA_single_signon_user'] = $user;
+    $_SESSION['PMA_single_signon_password'] = $pass;
+    $_SESSION['PMA_single_signon_host'] = $host;
+    $_SESSION['PMA_single_signon_port'] = $port;
+    @session_write_close();
+
+    $redirect = 'index.php';
+    if (!empty($db)) {
+        $redirect .= '?route=/database/structure&db=' . urlencode($db);
+    }
+    header('Location: ' . $redirect);
+    exit;
+}
+
+$errorMessage = $_SESSION['PMA_single_signon_error_message'] ?? '';
+unset($_SESSION['PMA_single_signon_error_message']);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>phpMyAdmin Sign-in</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b1120; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; width: 380px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); }
+        h2 { margin: 0 0 20px 0; font-size: 20px; font-weight: 700; color: #f59e0b; text-align: center; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; }
+        input { width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+        input:focus { border-color: #f59e0b; outline: none; }
+        button { width: 100%; background: linear-gradient(135deg, #f59e0b, #d97706); border: none; color: #fff; padding: 12px; border-radius: 6px; font-weight: 700; font-size: 14px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+        .error { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; line-height: 1.4; }
+        .hint { font-size: 12px; color: #64748b; text-align: center; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>⚡ phpMyAdmin Sign-in</h2>
+        <?php if (!empty($errorMessage)): ?>
+            <div class="error">⚠️ <?= htmlspecialchars($errorMessage) ?></div>
+        <?php endif; ?>
+        <form method="post" action="signon.php">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="user" required autofocus autocomplete="username" placeholder="e.g. root or db_user">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" autocomplete="current-password" placeholder="Database password">
+            </div>
+            <div class="form-group">
+                <label>Server Host</label>
+                <input type="text" name="host" value="127.0.0.1" required>
+            </div>
+            <input type="hidden" name="port" value="3306">
+            <button type="submit">Log In to phpMyAdmin</button>
+        </form>
+        <div class="hint">Host configured: 127.0.0.1:3306</div>
+    </div>
+</body>
+</html>
+EOF_SIGNON
 
 mkdir -p "$PMA_DIR/tmp"
 chmod 777 "$PMA_DIR/tmp"
@@ -493,5 +611,200 @@ def optimize_table(db_name: str, table_name: str) -> Tuple[bool, str]:
     if not re.match(r'^[a-zA-Z0-9_]+$', db_name) or not re.match(r'^[a-zA-Z0-9_]+$', table_name):
         return False, "Invalid database or table name"
     return run_mysql_command(f"OPTIMIZE TABLE `{db_name}`.`{table_name}`;")
+
+def ensure_pma_signon_config() -> None:
+    """Configures phpMyAdmin config.inc.php and signon.php for 127.0.0.1 and auto-login."""
+    pma_dir = Path("/var/www/phpmyadmin")
+    if not (pma_dir / "libraries").exists():
+        return
+
+    config_path = pma_dir / "config.inc.php"
+    signon_path = pma_dir / "signon.php"
+
+    blowfish = secrets.token_hex(16)
+    if config_path.exists():
+        try:
+            content = config_path.read_text(encoding="utf-8", errors="ignore")
+            m = re.search(r"\$cfg\['blowfish_secret'\]\s*=\s*'([^']+)'", content)
+            if m:
+                blowfish = m.group(1)
+        except Exception:
+            pass
+
+    config_content = f"""<?php
+declare(strict_types=1);
+
+$cfg['blowfish_secret'] = '{blowfish}';
+
+$i = 0;
+$i++;
+$cfg['Servers'][$i]['auth_type'] = 'signon';
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
+$cfg['Servers'][$i]['port'] = 3306;
+$cfg['Servers'][$i]['connect_type'] = 'tcp';
+$cfg['Servers'][$i]['compress'] = false;
+$cfg['Servers'][$i]['AllowNoPassword'] = true;
+$cfg['Servers'][$i]['SignonSession'] = 'PmaSignon';
+$cfg['Servers'][$i]['SignonURL'] = 'signon.php';
+$cfg['Servers'][$i]['SignonLogoutURL'] = 'signon.php?logout=1';
+
+$cfg['UploadDir'] = '';
+$cfg['SaveDir'] = '';
+$cfg['TempDir'] = '/var/www/phpmyadmin/tmp';
+"""
+    try:
+        config_path.write_text(config_content, encoding="utf-8")
+    except Exception as e:
+        logger.error(f"Failed to write phpmyadmin config.inc.php: {e}")
+
+    signon_content = """<?php
+declare(strict_types=1);
+
+ini_set('session.use_cookies', '1');
+ini_set('session.use_only_cookies', '1');
+session_name('PmaSignon');
+@session_start();
+
+if (isset($_GET['logout'])) {
+    $_SESSION = [];
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    @session_destroy();
+    header('Location: signon.php');
+    exit;
+}
+
+$user = $_REQUEST['user'] ?? '';
+$pass = $_REQUEST['password'] ?? '';
+$host = $_REQUEST['host'] ?? '127.0.0.1';
+$port = (int)($_REQUEST['port'] ?? 3306);
+$db   = $_REQUEST['db'] ?? '';
+
+if (!empty($user)) {
+    $_SESSION = [];
+    $_SESSION['PMA_single_signon_user'] = $user;
+    $_SESSION['PMA_single_signon_password'] = $pass;
+    $_SESSION['PMA_single_signon_host'] = $host;
+    $_SESSION['PMA_single_signon_port'] = $port;
+    @session_write_close();
+
+    $redirect = 'index.php';
+    if (!empty($db)) {
+        $redirect .= '?route=/database/structure&db=' . urlencode($db);
+    }
+    header('Location: ' . $redirect);
+    exit;
+}
+
+$errorMessage = $_SESSION['PMA_single_signon_error_message'] ?? '';
+unset($_SESSION['PMA_single_signon_error_message']);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>phpMyAdmin Sign-in</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b1120; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; width: 380px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); }
+        h2 { margin: 0 0 20px 0; font-size: 20px; font-weight: 700; color: #f59e0b; text-align: center; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; }
+        input { width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+        input:focus { border-color: #f59e0b; outline: none; }
+        button { width: 100%; background: linear-gradient(135deg, #f59e0b, #d97706); border: none; color: #fff; padding: 12px; border-radius: 6px; font-weight: 700; font-size: 14px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+        .error { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; line-height: 1.4; }
+        .hint { font-size: 12px; color: #64748b; text-align: center; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>⚡ phpMyAdmin Sign-in</h2>
+        <?php if (!empty($errorMessage)): ?>
+            <div class="error">⚠️ <?= htmlspecialchars($errorMessage) ?></div>
+        <?php endif; ?>
+        <form method="post" action="signon.php">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="user" required autofocus autocomplete="username" placeholder="e.g. root or db_user">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" autocomplete="current-password" placeholder="Database password">
+            </div>
+            <div class="form-group">
+                <label>Server Host</label>
+                <input type="text" name="host" value="127.0.0.1" required>
+            </div>
+            <input type="hidden" name="port" value="3306">
+            <button type="submit">Log In to phpMyAdmin</button>
+        </form>
+        <div class="hint">Host configured: 127.0.0.1:3306</div>
+    </div>
+</body>
+</html>
+"""
+    try:
+        signon_path.write_text(signon_content, encoding="utf-8")
+        tmp_dir = pma_dir / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        os.system(f"chmod 777 {tmp_dir} 2>/dev/null || true")
+        os.system(f"chown -R www-data:www-data {pma_dir} 2>/dev/null || true")
+    except Exception as e:
+        logger.error(f"Failed to write phpmyadmin signon.php: {e}")
+
+def sync_database_accounts() -> None:
+    """Ensure all databases recorded in SQLite have MariaDB privileges for both localhost and 127.0.0.1, and phpMyAdmin is properly configured."""
+    if not is_mysql_available():
+        return
+
+    try:
+        from app.database import get_db
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT db_name, db_user, db_pass, db_host FROM databases")
+        rows = cursor.fetchall()
+        conn.close()
+
+        for row in rows:
+            db_name = row["db_name"]
+            db_user = row["db_user"]
+            db_pass = row["db_pass"]
+            db_host = row["db_host"] or "127.0.0.1"
+            if not db_name or not db_user or not db_pass:
+                continue
+            escaped_pass = db_pass.replace("'", "\\'")
+            sql = f"""
+            CREATE USER IF NOT EXISTS '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}';
+            ALTER USER '{db_user}'@'localhost' IDENTIFIED BY '{escaped_pass}';
+            GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'localhost';
+
+            CREATE USER IF NOT EXISTS '{db_user}'@'127.0.0.1' IDENTIFIED BY '{escaped_pass}';
+            ALTER USER '{db_user}'@'127.0.0.1' IDENTIFIED BY '{escaped_pass}';
+            GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'127.0.0.1';
+            """
+            if db_host not in ["127.0.0.1", "localhost"]:
+                sql += f"""
+                CREATE USER IF NOT EXISTS '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}';
+                ALTER USER '{db_user}'@'{db_host}' IDENTIFIED BY '{escaped_pass}';
+                GRANT ALL PRIVILEGES ON `{db_name}`.* TO '{db_user}'@'{db_host}';
+                """
+            sql += "FLUSH PRIVILEGES;"
+            run_mysql_command(sql)
+    except Exception as e:
+        logger.error(f"Error syncing database accounts: {e}")
+
+    try:
+        ensure_pma_signon_config()
+    except Exception as e:
+        logger.error(f"Error ensuring phpmyadmin signon config: {e}")
+
 
 

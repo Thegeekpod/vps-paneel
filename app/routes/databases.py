@@ -64,14 +64,14 @@ async def stream_install_pma_action(request: Request, user: dict = Depends(login
     server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
 
     async def run_installer_stream():
-        script = f"""#!/usr/bin/env bash
+        script_template = """#!/usr/bin/env bash
 set -e
 exec 2>&1
 
 echo "===================================================================="
 echo " [TERMINAL] Starting Official phpMyAdmin 5.2.3 Setup"
 echo " Time: $(date)"
-echo " Server Host: {server_ip}"
+echo " Server Host: SERVER_IP_PLACEHOLDER"
 echo " Source: https://www.phpmyadmin.net/downloads/"
 echo "===================================================================="
 
@@ -83,7 +83,7 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y php-fpm php-mysql php-mbstring
 
 PHP_SOCK=$(find /run/php/ -name "php*-fpm.sock" 2>/dev/null | sort -V | tail -n 1)
 if [[ -z "$PHP_SOCK" ]]; then PHP_SOCK="/run/php/php8.3-fpm.sock"; fi
-echo "[+] PHP FastCGI socket: ${{PHP_SOCK}}"
+echo "[+] PHP FastCGI socket: ${PHP_SOCK}"
 
 echo "[-] 2/5 Downloading official phpMyAdmin from files.phpmyadmin.net..."
 PMA_TAR="/tmp/phpmyadmin-download.tar.gz"
@@ -103,14 +103,14 @@ if [[ ! -f "$PMA_TAR" || ! -s "$PMA_TAR" ]]; then
     exit 1
 fi
 
-echo "[-] 3/5 Extracting files into ${{PMA_DIR}}..."
+echo "[-] 3/5 Extracting files into ${PMA_DIR}..."
 rm -rf "$PMA_DIR"
 mkdir -p "$PMA_DIR"
 tar -xzf "$PMA_TAR" -C "$PMA_DIR" --strip-components=1
 rm -f "$PMA_TAR"
 echo "[+] Extraction completed."
 
-echo "[-] 4/5 Generating config.inc.php with Blowfish encryption secret..."
+echo "[-] 4/5 Generating config.inc.php and auto-login signon handler..."
 BLOWFISH=$(openssl rand -hex 16 2>/dev/null || echo "vpspanelblowfishsecretkey123456")
 cat > "$PMA_DIR/config.inc.php" << 'EOF_PMA'
 <?php
@@ -120,16 +120,117 @@ $cfg['blowfish_secret'] = 'BLOWFISH_KEY_PLACEHOLDER';
 
 $i = 0;
 $i++;
-$cfg['Servers'][$i]['auth_type'] = 'cookie';
-$cfg['Servers'][$i]['host'] = 'localhost';
+$cfg['Servers'][$i]['auth_type'] = 'signon';
+$cfg['Servers'][$i]['host'] = '127.0.0.1';
+$cfg['Servers'][$i]['port'] = 3306;
+$cfg['Servers'][$i]['connect_type'] = 'tcp';
 $cfg['Servers'][$i]['compress'] = false;
 $cfg['Servers'][$i]['AllowNoPassword'] = true;
+$cfg['Servers'][$i]['SignonSession'] = 'PmaSignon';
+$cfg['Servers'][$i]['SignonURL'] = 'signon.php';
+$cfg['Servers'][$i]['SignonLogoutURL'] = 'signon.php?logout=1';
 
 $cfg['UploadDir'] = '';
 $cfg['SaveDir'] = '';
 $cfg['TempDir'] = '/var/www/phpmyadmin/tmp';
 EOF_PMA
-sed -i "s|BLOWFISH_KEY_PLACEHOLDER|${{BLOWFISH}}|g" "$PMA_DIR/config.inc.php"
+sed -i "s|BLOWFISH_KEY_PLACEHOLDER|${BLOWFISH}|g" "$PMA_DIR/config.inc.php"
+
+cat > "$PMA_DIR/signon.php" << 'EOF_SIGNON'
+<?php
+declare(strict_types=1);
+
+ini_set('session.use_cookies', '1');
+ini_set('session.use_only_cookies', '1');
+session_name('PmaSignon');
+@session_start();
+
+if (isset($_GET['logout'])) {
+    $_SESSION = [];
+    if (ini_get("session.use_cookies")) {
+        $params = session_get_cookie_params();
+        setcookie(session_name(), '', time() - 42000,
+            $params["path"], $params["domain"],
+            $params["secure"], $params["httponly"]
+        );
+    }
+    @session_destroy();
+    header('Location: signon.php');
+    exit;
+}
+
+$user = $_REQUEST['user'] ?? '';
+$pass = $_REQUEST['password'] ?? '';
+$host = $_REQUEST['host'] ?? '127.0.0.1';
+$port = (int)($_REQUEST['port'] ?? 3306);
+$db   = $_REQUEST['db'] ?? '';
+
+if (!empty($user)) {
+    $_SESSION = [];
+    $_SESSION['PMA_single_signon_user'] = $user;
+    $_SESSION['PMA_single_signon_password'] = $pass;
+    $_SESSION['PMA_single_signon_host'] = $host;
+    $_SESSION['PMA_single_signon_port'] = $port;
+    @session_write_close();
+
+    $redirect = 'index.php';
+    if (!empty($db)) {
+        $redirect .= '?route=/database/structure&db=' . urlencode($db);
+    }
+    header('Location: ' . $redirect);
+    exit;
+}
+
+$errorMessage = $_SESSION['PMA_single_signon_error_message'] ?? '';
+unset($_SESSION['PMA_single_signon_error_message']);
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>phpMyAdmin Sign-in</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0b1120; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+        .box { background: #1e293b; border: 1px solid #334155; border-radius: 12px; padding: 32px; width: 380px; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); }
+        h2 { margin: 0 0 20px 0; font-size: 20px; font-weight: 700; color: #f59e0b; text-align: center; }
+        .form-group { margin-bottom: 16px; }
+        label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 6px; }
+        input { width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #334155; color: #fff; padding: 10px 12px; border-radius: 6px; font-size: 14px; }
+        input:focus { border-color: #f59e0b; outline: none; }
+        button { width: 100%; background: linear-gradient(135deg, #f59e0b, #d97706); border: none; color: #fff; padding: 12px; border-radius: 6px; font-weight: 700; font-size: 14px; cursor: pointer; margin-top: 10px; }
+        button:hover { background: linear-gradient(135deg, #fbbf24, #f59e0b); }
+        .error { background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #fca5a5; padding: 12px; border-radius: 6px; font-size: 13px; margin-bottom: 16px; line-height: 1.4; }
+        .hint { font-size: 12px; color: #64748b; text-align: center; margin-top: 16px; }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h2>⚡ phpMyAdmin Sign-in</h2>
+        <?php if (!empty($errorMessage)): ?>
+            <div class="error">⚠️ <?= htmlspecialchars($errorMessage) ?></div>
+        <?php endif; ?>
+        <form method="post" action="signon.php">
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" name="user" required autofocus autocomplete="username" placeholder="e.g. root or db_user">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" name="password" autocomplete="current-password" placeholder="Database password">
+            </div>
+            <div class="form-group">
+                <label>Server Host</label>
+                <input type="text" name="host" value="127.0.0.1" required>
+            </div>
+            <input type="hidden" name="port" value="3306">
+            <button type="submit">Log In to phpMyAdmin</button>
+        </form>
+        <div class="hint">Host configured: 127.0.0.1:3306</div>
+    </div>
+</body>
+</html>
+EOF_SIGNON
 
 mkdir -p "$PMA_DIR/tmp"
 chmod 777 "$PMA_DIR/tmp"
@@ -141,7 +242,7 @@ echo "[+] Permissions set & Blowfish secret generated."
 
 echo "[-] 5/5 Configuring Nginx FastCGI on Port 888..."
 cat > /etc/nginx/sites-available/phpmyadmin.conf << 'EOF_NGINX'
-server {{
+server {
     listen 888 default_server;
     listen [::]:888 default_server;
     server_name _;
@@ -150,22 +251,22 @@ server {{
 
     client_max_body_size 256M;
 
-    location / {{
+    location / {
         try_files $uri $uri/ /index.php?$query_string;
-    }}
+    }
 
-    location ~ \\.php$ {{
+    location ~ \.php$ {
         include snippets/fastcgi-php.conf;
         fastcgi_pass unix:PHP_SOCK_PLACEHOLDER;
         fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
-    }}
+    }
 
-    location ~ /\\.ht {{
+    location ~ /\.ht {
         deny all;
-    }}
-}}
+    }
+}
 EOF_NGINX
-sed -i "s|PHP_SOCK_PLACEHOLDER|${{PHP_SOCK}}|g" /etc/nginx/sites-available/phpmyadmin.conf
+sed -i "s|PHP_SOCK_PLACEHOLDER|${PHP_SOCK}|g" /etc/nginx/sites-available/phpmyadmin.conf
 ln -sf /etc/nginx/sites-available/phpmyadmin.conf /etc/nginx/sites-enabled/phpmyadmin.conf
 ufw allow 888/tcp 2>/dev/null || true
 
@@ -175,9 +276,10 @@ echo "[+] Nginx configuration verified & reloaded on Port 888."
 
 echo "===================================================================="
 echo " [SUCCESS] Official phpMyAdmin is INSTALLED and READY!"
-echo " Access URL: http://{server_ip}:888"
+echo " Access URL: http://SERVER_IP_PLACEHOLDER:888"
 echo "===================================================================="
 """
+        script = script_template.replace("SERVER_IP_PLACEHOLDER", server_ip)
         proc = subprocess.Popen(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         for line in iter(proc.stdout.readline, ''):
             yield f"data: {line}\n\n"
