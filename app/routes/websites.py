@@ -1,3 +1,5 @@
+import re
+import secrets
 import shutil
 import urllib.parse
 from pathlib import Path
@@ -8,8 +10,9 @@ from app.auth import login_required
 from app.config import WEB_ROOT
 from app.database import get_db, log_action
 from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx
-from app.services.ssl_service import issue_ssl
+from app.services.ssl_service import issue_ssl, remove_ssl
 from app.services.git_service import clone_repository, pull_repository
+from app.services.database_service import create_db_and_user, drop_db_and_user
 from app.templates_util import render
 
 router = APIRouter(prefix="/websites")
@@ -43,6 +46,10 @@ async def create_website_action(
     php_version: str = Form("8.3"),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
+    create_db: Optional[str] = Form(None),
+    db_name: Optional[str] = Form(None),
+    db_user: Optional[str] = Form(None),
+    db_pass: Optional[str] = Form(None),
     user: dict = Depends(login_required)
 ):
     domain = domain.strip().lower()
@@ -105,6 +112,52 @@ async def create_website_action(
     except Exception:
         pass
 
+    # Optional Database Creation
+    linked_db_name = None
+    db_info_msg = ""
+    should_create_db = create_db in ["1", "true", "on", True]
+
+    if should_create_db:
+        # Generate safe database name
+        if db_name and db_name.strip():
+            raw_db = db_name.strip()
+        else:
+            raw_db = domain.replace(".", "_").replace("-", "_")
+        clean_db = re.sub(r'[^a-zA-Z0-9_]', '_', raw_db)[:16].strip('_')
+        if not clean_db:
+            clean_db = "site_db"
+            
+        # User
+        if db_user and db_user.strip():
+            clean_user = re.sub(r'[^a-zA-Z0-9_]', '_', db_user.strip())[:16].strip('_')
+        else:
+            clean_user = clean_db[:16]
+            
+        # Password
+        if db_pass and db_pass.strip():
+            clean_pass = db_pass.strip()
+        else:
+            clean_pass = secrets.token_urlsafe(12)
+
+        db_success, db_err = create_db_and_user(clean_db, clean_user, clean_pass, db_host="127.0.0.1", charset="utf8mb4")
+        if db_success:
+            linked_db_name = clean_db
+            conn = get_db()
+            cur = conn.cursor()
+            try:
+                cur.execute(
+                    "INSERT INTO databases (db_name, db_user, db_pass, db_host, charset, note) VALUES (?, ?, ?, ?, ?, ?)",
+                    (clean_db, clean_user, clean_pass, "127.0.0.1", "utf8mb4", f"Created with website: {domain}")
+                )
+                conn.commit()
+            except Exception:
+                pass
+            conn.close()
+            db_info_msg = f" (Database: {clean_db} created)"
+            log_action(user["username"], "CreateDatabaseForSite", f"Domain: {domain}, DB: {clean_db}, User: {clean_user}", request.client.host)
+        else:
+            log_action(user["username"], "CreateDatabaseFailed", f"Domain: {domain}, Error: {db_err}", request.client.host)
+
     # Create Nginx VirtualHost
     vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version)
 
@@ -112,8 +165,8 @@ async def create_website_action(
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch) VALUES (?, ?, ?, ?, ?, ?)",
-            (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None)
+            "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name)
         )
         conn.commit()
     except Exception as e:
@@ -124,32 +177,94 @@ async def create_website_action(
     action_details = f"Domain: {domain}, Status: {'OK' if vhost_success else vhost_msg}"
     if clean_git_repo:
         action_details += f", Git: {clean_git_repo}"
+    if linked_db_name:
+        action_details += f", DB: {linked_db_name}"
     log_action(user["username"], "CreateWebsite", action_details, request.client.host)
     
-    success_msg = f"Website {domain} created successfully!"
+    success_msg = f"Website {domain} created successfully!{db_info_msg}"
     if clean_git_repo:
         success_msg += " (Repository cloned)"
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(success_msg)}", status_code=303)
 
 @router.post("/{site_id}/delete")
-async def delete_website_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+async def delete_website_action(
+    site_id: int,
+    request: Request,
+    delete_files: Optional[str] = Form(None),
+    delete_ssl: Optional[str] = Form(None),
+    delete_db: Optional[str] = Form(None),
+    user: dict = Depends(login_required)
+):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
     site = cursor.fetchone()
     if not site:
         conn.close()
-        raise HTTPException(status_code=404, detail="Website not found")
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Website not found')}", status_code=303)
 
     domain = site["domain"]
+    root_dir_str = site["root_dir"]
+    site_keys = site.keys()
+    linked_db = site["db_name"] if "db_name" in site_keys else None
+
+    should_delete_files = delete_files in ["1", "true", "on", True]
+    should_delete_ssl = delete_ssl in ["1", "true", "on", True]
+    should_delete_db = delete_db in ["1", "true", "on", True]
+
+    # 1. Delete Nginx vhost
     delete_vhost(domain)
 
+    # 2. Remove SSL certificate if requested
+    if should_delete_ssl:
+        remove_ssl(domain)
+
+    # 3. Delete files if requested
+    if should_delete_files and root_dir_str:
+        try:
+            root_path = Path(root_dir_str).resolve()
+            # Safety guards: never delete root, system, or panel dirs
+            forbidden = ["/", "/var", "/var/www", "/www", "/www/wwwroot", "/root", "/home", "/etc", "/usr", "/tmp"]
+            if str(root_path) not in forbidden and len(str(root_path)) > 7:
+                if root_path.exists():
+                    shutil.rmtree(str(root_path), ignore_errors=True)
+        except Exception:
+            pass
+
+    # 4. Delete Database if requested
+    if should_delete_db:
+        # If no explicit linked_db, check for matching db by domain name
+        if not linked_db:
+            clean_d = re.sub(r'[^a-zA-Z0-9_]', '_', domain)[:16].strip('_')
+            cursor.execute("SELECT db_name FROM databases WHERE db_name = ? OR note LIKE ?", (clean_d, f"%{domain}%"))
+            db_match = cursor.fetchone()
+            if db_match:
+                linked_db = db_match["db_name"]
+
+        if linked_db:
+            cursor.execute("SELECT db_user, db_host FROM databases WHERE db_name = ?", (linked_db,))
+            db_row = cursor.fetchone()
+            db_user = db_row["db_user"] if db_row else None
+            db_host = db_row["db_host"] if db_row else "127.0.0.1"
+            drop_db_and_user(linked_db, db_user, db_host)
+            cursor.execute("DELETE FROM databases WHERE db_name = ?", (linked_db,))
+
+    # 5. Delete website from websites table
     cursor.execute("DELETE FROM websites WHERE id = ?", (site_id,))
     conn.commit()
     conn.close()
 
-    log_action(user["username"], "DeleteWebsite", f"Deleted: {domain}", request.client.host)
-    return RedirectResponse(url="/websites", status_code=303)
+    deleted_info = []
+    if should_delete_files:
+        deleted_info.append("files removed")
+    if should_delete_ssl:
+        deleted_info.append("SSL removed")
+    if should_delete_db and linked_db:
+        deleted_info.append(f"database {linked_db} removed")
+
+    info_str = f" ({', '.join(deleted_info)})" if deleted_info else ""
+    log_action(user["username"], "DeleteWebsite", f"Deleted {domain}{info_str}", request.client.host)
+    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Website {domain} deleted successfully{info_str}')}", status_code=303)
 
 @router.post("/{site_id}/ssl")
 async def issue_ssl_action(site_id: int, request: Request, user: dict = Depends(login_required)):
@@ -226,6 +341,7 @@ async def update_website_settings(
     php_version: str = Form("8.3"),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
+    db_name: Optional[str] = Form(None),
     user: dict = Depends(login_required)
 ):
     conn = get_db()
@@ -251,6 +367,7 @@ async def update_website_settings(
 
     clean_git_repo = git_repo.strip() if git_repo else ""
     clean_git_branch = git_branch.strip() if git_branch else ""
+    clean_db_name = db_name.strip() if db_name and db_name.strip() else None
 
     # Reconfigure Nginx vhost with new root_dir and php_version
     vhost_success, vhost_msg = create_vhost(domain, str(new_root), php_version)
@@ -270,8 +387,8 @@ async def update_website_settings(
         pass
 
     cursor.execute(
-        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ? WHERE id = ?",
-        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, site_id)
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, site_id)
     )
     conn.commit()
     conn.close()

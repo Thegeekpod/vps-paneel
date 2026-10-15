@@ -41,6 +41,7 @@ def init_db():
         ssl_expires_at TEXT,
         git_repo TEXT,
         git_branch TEXT,
+        db_name TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -52,6 +53,10 @@ def init_db():
         pass
     try:
         cursor.execute("ALTER TABLE websites ADD COLUMN git_branch TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN db_name TEXT")
     except Exception:
         pass
 

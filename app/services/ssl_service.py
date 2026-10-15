@@ -52,3 +52,19 @@ def issue_ssl(domain: str, webroot: str, email: str = "") -> Tuple[bool, str]:
         return True, "SSL Certificate issued and Nginx reloaded"
     except Exception as e:
         return False, str(e)
+
+def remove_ssl(domain: str) -> Tuple[bool, str]:
+    if os.name == 'nt' or not Path("/usr/bin/certbot").exists():
+        # Simulation or directory cleanup
+        live_dir = LETSENCRYPT_DIR / "live" / domain
+        if live_dir.exists():
+            import shutil
+            shutil.rmtree(str(live_dir), ignore_errors=True)
+        return True, "SSL Certificate removed (Simulation mode)"
+
+    cmd = ["certbot", "delete", "--cert-name", domain, "--non-interactive"]
+    try:
+        res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=30)
+        return True, "SSL Certificate removed successfully"
+    except Exception as e:
+        return False, str(e)
