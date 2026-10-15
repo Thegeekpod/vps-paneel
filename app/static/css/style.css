@@ -548,4 +548,123 @@ input:focus, select:focus, textarea:focus {
     display: block;
 }
 
+/* Interactive Status Badge Button */
+.status-badge-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    border-radius: 9999px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+    user-select: none;
+    background: transparent;
+}
+.status-badge-btn:hover {
+    filter: brightness(1.2);
+    transform: translateY(-1px);
+}
+.status-badge-btn.status-active {
+    background: rgba(16, 185, 129, 0.15);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.35);
+}
+.status-badge-btn.status-maintenance {
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.35);
+}
+.status-badge-btn.status-disabled {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+.status-badge-btn.status-failed {
+    background: rgba(239, 68, 68, 0.15);
+    color: #f87171;
+    border-color: rgba(239, 68, 68, 0.35);
+}
+
+.status-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    display: inline-block;
+}
+.status-active .status-dot { background: #34d399; box-shadow: 0 0 6px #34d399; }
+.status-maintenance .status-dot { background: #fbbf24; box-shadow: 0 0 6px #fbbf24; }
+.status-disabled .status-dot { background: #f87171; }
+.status-failed .status-dot { background: #f87171; }
+
+/* Status Floating Dropdown Menu */
+#globalStatusDropdown {
+    position: fixed;
+    display: none;
+    flex-direction: column;
+    min-width: 230px;
+    background: #0f172a;
+    border: 1px solid var(--border-hover, #334155);
+    border-radius: 12px;
+    padding: 6px;
+    box-shadow: 0 16px 36px -4px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(255, 255, 255, 0.08);
+    z-index: 10000;
+    animation: fadeIn 0.15s ease-out;
+}
+#globalStatusDropdown.show {
+    display: flex;
+}
+.status-menu-header {
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    padding: 6px 10px 4px 10px;
+}
+.status-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    cursor: pointer;
+    text-align: left;
+    width: 100%;
+    transition: background 0.15s ease;
+}
+.status-menu-item:hover {
+    background: #1e293b;
+}
+.status-menu-item.active {
+    background: rgba(56, 189, 248, 0.12);
+}
+.status-menu-item .item-title {
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+.status-menu-item .item-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+.status-menu-item .item-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.status-menu-item .item-check {
+    margin-left: auto;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 700;
+}
+
 

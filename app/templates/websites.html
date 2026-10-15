@@ -38,9 +38,6 @@
                                 <span style="font-size: 10px;">↗</span>
                             </a>
                             <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
-                                {% if site.is_maintenance %}
-                                <span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 11px; font-weight: 600;">🚧 Maintenance</span>
-                                {% endif %}
                                 {% if site.redirect_url %}
                                 <span class="badge" style="background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); font-size: 11px;" title="Redirects to {{ site.redirect_url }}">↗️ {{ site.redirect_type or 301 }} Redirect</span>
                                 {% endif %}
@@ -68,11 +65,25 @@
                     <td><code>{{ site.root_dir }}</code></td>
                     <td><span class="badge badge-gray">PHP {{ site.php_version }}</span></td>
                     <td>
-                        {% if site.status == 'active' %}
-                        <span class="badge badge-success">Active</span>
-                        {% else %}
-                        <span class="badge badge-danger">Failed</span>
-                        {% endif %}
+                        {% set curr_status = 'maintenance' if (site.is_maintenance or site.status == 'maintenance') else ('disabled' if site.status in ['disabled', 'deactivated'] else ('failed' if site.status == 'failed' else 'active')) %}
+                        <button type="button" 
+                                class="status-badge-btn status-{{ curr_status }}" 
+                                onclick="openStatusDropdown({{ site.id }}, '{{ site.domain }}', '{{ curr_status }}', event)"
+                                title="Click to change status: Active, Maintenance, Deactivated">
+                            <span class="status-dot"></span>
+                            <span>
+                                {% if curr_status == 'active' %}
+                                Active
+                                {% elif curr_status == 'maintenance' %}
+                                Maintenance
+                                {% elif curr_status == 'disabled' %}
+                                Deactivated
+                                {% else %}
+                                Failed
+                                {% endif %}
+                            </span>
+                            <span style="font-size: 8px; opacity: 0.6; margin-left: 2px;">▼</span>
+                        </button>
                     </td>
                     <td>
                         <button type="button" onclick="openSslModal({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}')" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; {% if site.ssl_enabled %}color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.08);{% else %}color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.08);{% endif %}" title="Open SSL Certificate Manager">
@@ -91,7 +102,7 @@
                             <a href="/terminal?dir={{ site.root_dir }}" class="btn btn-secondary btn-icon" title="Open Terminal in Website Root ({{ site.root_dir }})" target="_blank">
                                 💻
                             </a>
-                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }})" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
+                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }}, '{{ curr_status }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
                                 ⚙️
                             </button>
                             {% if site.git_repo %}
@@ -105,11 +116,6 @@
                             <button type="button" onclick="openDeleteModal({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.db_name or '' }}')" class="btn btn-danger btn-icon" title="Delete Website">
                                 🗑️
                             </button>
-                            <!-- Maintenance Switch Toggle right after Delete Icon -->
-                            <label class="switch" title="Under Maintenance Mode (Site will show 503 maintenance page when ON)" style="margin-left: 2px;">
-                                <input type="checkbox" onchange="toggleSiteMaintenance({{ site.id }}, '{{ site.domain }}', this)" {% if site.is_maintenance %}checked{% endif %}>
-                                <span class="switch-slider"></span>
-                            </label>
                         </div>
                     </td>
                 </tr>
@@ -308,6 +314,17 @@
                         <option value="8.3">PHP 8.3 FPM (Recommended)</option>
                         <option value="8.2">PHP 8.2 FPM</option>
                         <option value="8.4">PHP 8.4 FPM</option>
+                    </select>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                        Website Status
+                    </label>
+                    <select name="status" id="settingsSiteStatus">
+                        <option value="active">🟢 Active (Online & normal traffic)</option>
+                        <option value="maintenance">🟡 Under Maintenance (503 Maintenance Page)</option>
+                        <option value="disabled">🔴 Deactivated (Suspended - 403 Page)</option>
                     </select>
                 </div>
             </div>
@@ -563,6 +580,35 @@
         </div>
     </div>
 </div>
+
+<!-- Global Floating Status Dropdown Menu -->
+<div id="globalStatusDropdown">
+    <div class="status-menu-header" id="statusDropdownTitle">Change Status</div>
+    <button type="button" class="status-menu-item" id="statusOption_active" onclick="selectSiteStatus('active')">
+        <span class="item-dot" style="background: #34d399; box-shadow: 0 0 6px rgba(52, 211, 153, 0.6);"></span>
+        <div>
+            <div class="item-title" style="color: #34d399;">Active</div>
+            <div class="item-desc">Site online & serving traffic</div>
+        </div>
+        <span class="item-check" id="statusCheck_active" style="display:none;">✓</span>
+    </button>
+    <button type="button" class="status-menu-item" id="statusOption_maintenance" onclick="selectSiteStatus('maintenance')">
+        <span class="item-dot" style="background: #fbbf24; box-shadow: 0 0 6px rgba(251, 191, 36, 0.6);"></span>
+        <div>
+            <div class="item-title" style="color: #fbbf24;">Under Maintenance</div>
+            <div class="item-desc">Shows 503 maintenance page</div>
+        </div>
+        <span class="item-check" id="statusCheck_maintenance" style="display:none;">✓</span>
+    </button>
+    <button type="button" class="status-menu-item" id="statusOption_disabled" onclick="selectSiteStatus('disabled')">
+        <span class="item-dot" style="background: #f87171; box-shadow: 0 0 6px rgba(248, 113, 113, 0.6);"></span>
+        <div>
+            <div class="item-title" style="color: #f87171;">Deactivated</div>
+            <div class="item-desc">Suspend website traffic (403)</div>
+        </div>
+        <span class="item-check" id="statusCheck_disabled" style="display:none;">✓</span>
+    </button>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -691,7 +737,75 @@ function switchSettingsTab(tabId) {
     if (pane) pane.classList.add("active");
 }
 
-function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType) {
+let currentStatusDropdownSiteId = null;
+let currentStatusDropdownDomain = null;
+
+function openStatusDropdown(siteId, domain, currentStatus, event) {
+    event.stopPropagation();
+    currentStatusDropdownSiteId = siteId;
+    currentStatusDropdownDomain = domain;
+
+    const dropdown = document.getElementById("globalStatusDropdown");
+    document.getElementById("statusDropdownTitle").innerText = `${domain} • Status`;
+
+    // Highlight current option
+    ["active", "maintenance", "disabled"].forEach(st => {
+        const opt = document.getElementById("statusOption_" + st);
+        const check = document.getElementById("statusCheck_" + st);
+        const isCurrent = (currentStatus === st || (st === 'disabled' && (currentStatus === 'deactivated' || currentStatus === 'failed')));
+        if (opt) opt.classList.toggle("active", isCurrent);
+        if (check) check.style.display = isCurrent ? "inline" : "none";
+    });
+
+    const btn = event.currentTarget;
+    const rect = btn.getBoundingClientRect();
+    
+    // Position menu directly under the button
+    dropdown.style.top = `${rect.bottom + 6}px`;
+    dropdown.style.left = `${Math.min(rect.left, window.innerWidth - 250)}px`;
+    dropdown.classList.add("show");
+}
+
+function closeStatusDropdown() {
+    const dropdown = document.getElementById("globalStatusDropdown");
+    if (dropdown) dropdown.classList.remove("show");
+}
+
+document.addEventListener("click", function(e) {
+    const dropdown = document.getElementById("globalStatusDropdown");
+    if (dropdown && !dropdown.contains(e.target)) {
+        closeStatusDropdown();
+    }
+});
+
+async function selectSiteStatus(newStatus) {
+    if (!currentStatusDropdownSiteId) return;
+    const siteId = currentStatusDropdownSiteId;
+    const domain = currentStatusDropdownDomain;
+    closeStatusDropdown();
+
+    const labelMap = { active: 'Active', maintenance: 'Under Maintenance', disabled: 'Deactivated' };
+    showToast(`Setting ${domain} to ${labelMap[newStatus] || newStatus}...`, 'success');
+
+    try {
+        const res = await fetch(`/websites/${siteId}/change-status`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: new URLSearchParams({ status: newStatus })
+        });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, 'success');
+            setTimeout(() => location.reload(), 800);
+        } else {
+            showToast(data.error || 'Failed to update status', 'danger');
+        }
+    } catch (e) {
+        showToast(`Request failed: ${e}`, 'danger');
+    }
+}
+
+function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType, siteStatus) {
     currentSiteSettingsId = id;
     document.getElementById("settingsSiteId").value = id;
     document.getElementById("settingsModalDomain").innerText = domain;
@@ -704,6 +818,11 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
     document.getElementById("settingsRedirectUrl").value = redirectUrl || "";
     document.getElementById("settingsRedirectType").value = redirectType || 301;
     
+    const statusSelect = document.getElementById("settingsSiteStatus");
+    if (statusSelect) {
+        statusSelect.value = (siteStatus === "deactivated" ? "disabled" : (siteStatus || "active"));
+    }
+
     const projSelect = document.getElementById("settingsProjectType");
     if (projSelect) {
         projSelect.value = projectType || "php";
@@ -715,28 +834,6 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
 
     document.getElementById("siteSettingsForm").action = `/websites/${id}/settings`;
     openModal("siteSettingsModal");
-}
-
-async function toggleSiteMaintenance(siteId, domain, checkbox) {
-    const originalState = !checkbox.checked;
-    checkbox.disabled = true;
-    showToast(`Updating maintenance mode for ${domain}...`, 'success');
-    try {
-        const res = await fetch(`/websites/${siteId}/toggle-maintenance`, { method: 'POST' });
-        const data = await res.json();
-        if (data.success) {
-            showToast(data.message, 'success');
-            setTimeout(() => location.reload(), 1000);
-        } else {
-            showToast(data.error || 'Failed to toggle maintenance mode', 'danger');
-            checkbox.checked = originalState;
-        }
-    } catch (e) {
-        showToast(`Request failed: ${e}`, 'danger');
-        checkbox.checked = originalState;
-    } finally {
-        checkbox.disabled = false;
-    }
 }
 
 function openDeleteModal(id, domain, rootDir, dbName) {

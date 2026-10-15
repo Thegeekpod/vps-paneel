@@ -242,6 +242,95 @@ def ensure_maintenance_page(domain: str) -> Path:
     except Exception:
         return m_dir
 
+def ensure_disabled_page(domain: str) -> Path:
+    """Creates a sleek, modern responsive deactivated/suspended page for the domain."""
+    m_dir = Path("/var/www/maintenance") / domain
+    try:
+        m_dir.mkdir(parents=True, exist_ok=True)
+        index_file = m_dir / "disabled.html"
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Website Deactivated - {domain}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #090d16;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 24px;
+        }}
+        .card {{
+            background: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 20px;
+            padding: 50px 36px;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+        }}
+        .icon {{
+            font-size: 52px;
+            margin-bottom: 20px;
+            display: inline-block;
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            color: #f87171;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 18px;
+        }}
+        h1 {{
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 12px;
+        }}
+        p {{
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }}
+        .domain-tag {{
+            font-size: 13px;
+            color: #94a3b8;
+            font-weight: 500;
+            padding: 6px 12px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 6px;
+            display: inline-block;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">🛑</div>
+        <div><span class="badge">Website Deactivated</span></div>
+        <h1>Site Temporarily Offline</h1>
+        <p>This website has been temporarily deactivated by the server administrator.</p>
+        <div class="domain-tag">{domain}</div>
+    </div>
+</body>
+</html>"""
+        index_file.write_text(html, encoding="utf-8")
+        return m_dir
+    except Exception:
+        return m_dir
+
 def create_vhost(
     domain: str,
     root_dir: str,
@@ -249,7 +338,8 @@ def create_vhost(
     project_type: str = "php",
     redirect_url: str = None,
     redirect_type: int = 301,
-    is_maintenance: bool = False
+    is_maintenance: bool = False,
+    status: str = "active"
 ) -> Tuple[bool, str]:
     vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
     vhost_enabled = NGINX_ENABLED / f"{domain}.conf"
@@ -260,7 +350,7 @@ def create_vhost(
     if project_type == "laravel" and not clean_root.endswith("/public"):
         clean_root = f"{clean_root}/public"
 
-    if is_maintenance:
+    if is_maintenance or status == "maintenance":
         m_dir = ensure_maintenance_page(domain)
         config = f"""server {{
     listen 80;
@@ -274,6 +364,23 @@ def create_vhost(
 
     location / {{
         try_files /index.html =503;
+    }}
+}}
+"""
+    elif status in ["disabled", "deactivated", "inactive"]:
+        d_dir = ensure_disabled_page(domain)
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+    root {d_dir};
+    index disabled.html;
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    location / {{
+        try_files /disabled.html =403;
     }}
 }}
 """

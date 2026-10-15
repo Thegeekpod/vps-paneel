@@ -545,12 +545,84 @@ async def sync_vhost_action(site_id: int, request: Request, user: dict = Depends
         project_type,
         redirect_url=redirect_url,
         redirect_type=redirect_type,
-        is_maintenance=is_maintenance
+        is_maintenance=is_maintenance,
+        status=site["status"] or "active"
     )
     conn.close()
 
     log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Preset: {project_type}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": success, "message": msg})
+
+@router.post("/{site_id}/change-status")
+async def change_status_action(
+    site_id: int,
+    request: Request,
+    user: dict = Depends(login_required)
+):
+    try:
+        content_type = request.headers.get("content-type", "")
+        if "application/json" in content_type:
+            body = await request.json()
+            new_status = body.get("status")
+        else:
+            form = await request.form()
+            new_status = form.get("status")
+    except Exception:
+        new_status = None
+
+    if new_status not in ["active", "maintenance", "disabled", "deactivated"]:
+        new_status = "active"
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    if not site:
+        conn.close()
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    domain = site["domain"]
+    root_dir = site["root_dir"]
+    php_version = site["php_version"] or "8.3"
+    site_keys = site.keys()
+    project_type = site["project_type"] if "project_type" in site_keys and site["project_type"] else "php"
+    redirect_url = site["redirect_url"] if "redirect_url" in site_keys else None
+    redirect_type = site["redirect_type"] if "redirect_type" in site_keys and site["redirect_type"] else 301
+
+    is_maint = (new_status == "maintenance")
+    db_status = "disabled" if new_status in ["disabled", "deactivated"] else ("maintenance" if new_status == "maintenance" else "active")
+
+    vhost_success, vhost_msg = create_vhost(
+        domain,
+        root_dir,
+        php_version=php_version,
+        project_type=project_type,
+        redirect_url=redirect_url,
+        redirect_type=redirect_type,
+        is_maintenance=is_maint,
+        status=db_status
+    )
+
+    if not vhost_success:
+        conn.close()
+        return JSONResponse({"success": False, "error": f"Failed to update Nginx: {vhost_msg}"}, status_code=500)
+
+    cursor.execute("UPDATE websites SET status = ?, is_maintenance = ? WHERE id = ?", (db_status, 1 if is_maint else 0, site_id))
+    conn.commit()
+    conn.close()
+
+    status_labels = {
+        "active": "Active",
+        "maintenance": "Under Maintenance",
+        "disabled": "Deactivated"
+    }
+    label = status_labels.get(db_status, db_status.capitalize())
+    log_action(user["username"], "ChangeWebsiteStatus", f"Domain: {domain}, New Status: {label}", get_client_ip(request))
+    return JSONResponse({
+        "success": True,
+        "message": f"{domain} status changed to {label}",
+        "status": db_status
+    })
 
 @router.post("/{site_id}/toggle-maintenance")
 async def toggle_maintenance_action(site_id: int, request: Request, user: dict = Depends(login_required)):
@@ -572,6 +644,7 @@ async def toggle_maintenance_action(site_id: int, request: Request, user: dict =
     project_type = site["project_type"] if "project_type" in site_keys and site["project_type"] else "php"
     redirect_url = site["redirect_url"] if "redirect_url" in site_keys else None
     redirect_type = site["redirect_type"] if "redirect_type" in site_keys and site["redirect_type"] else 301
+    db_status = "maintenance" if new_status else "active"
 
     vhost_success, vhost_msg = create_vhost(
         domain,
@@ -580,14 +653,15 @@ async def toggle_maintenance_action(site_id: int, request: Request, user: dict =
         project_type=project_type,
         redirect_url=redirect_url,
         redirect_type=redirect_type,
-        is_maintenance=new_status
+        is_maintenance=new_status,
+        status=db_status
     )
 
     if not vhost_success:
         conn.close()
         return JSONResponse({"success": False, "error": f"Failed to update Nginx: {vhost_msg}"}, status_code=500)
 
-    cursor.execute("UPDATE websites SET is_maintenance = ? WHERE id = ?", (1 if new_status else 0, site_id))
+    cursor.execute("UPDATE websites SET status = ?, is_maintenance = ? WHERE id = ?", (db_status, 1 if new_status else 0, site_id))
     conn.commit()
     conn.close()
 
@@ -596,6 +670,7 @@ async def toggle_maintenance_action(site_id: int, request: Request, user: dict =
     return JSONResponse({
         "success": True,
         "is_maintenance": new_status,
+        "status": db_status,
         "message": f"Maintenance mode {status_label} for {domain}"
     })
 
@@ -645,6 +720,7 @@ async def update_website_settings(
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
     db_name: Optional[str] = Form(None),
+    status: Optional[str] = Form(None),
     user: dict = Depends(login_required)
 ):
     conn = get_db()
@@ -678,7 +754,10 @@ async def update_website_settings(
     clean_redirect_url = redirect_url.strip() if redirect_url and redirect_url.strip() else None
     
     site_keys = site.keys()
-    is_maintenance = bool(site["is_maintenance"]) if "is_maintenance" in site_keys else False
+    current_status = site["status"] or "active"
+    if status in ["active", "maintenance", "disabled", "deactivated"]:
+        current_status = "disabled" if status in ["disabled", "deactivated"] else status
+    is_maintenance = (current_status == "maintenance")
 
     # Reconfigure Nginx vhost with new settings
     vhost_success, vhost_msg = create_vhost(
@@ -688,7 +767,8 @@ async def update_website_settings(
         project_type=project_type,
         redirect_url=clean_redirect_url,
         redirect_type=redirect_type,
-        is_maintenance=is_maintenance
+        is_maintenance=is_maintenance,
+        status=current_status
     )
     if not vhost_success:
         conn.close()
@@ -709,8 +789,8 @@ async def update_website_settings(
         setup_laravel_environment(new_root, clean_db_name, php_version=php_version)
 
     cursor.execute(
-        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ? WHERE id = ?",
-        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, site_id)
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ?, status = ?, is_maintenance = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, current_status, 1 if is_maintenance else 0, site_id)
     )
     conn.commit()
     conn.close()
