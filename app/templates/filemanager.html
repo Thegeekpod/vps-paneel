@@ -472,6 +472,62 @@
     </div>
 </div>
 
+<!-- Modal: Upload Progress -->
+<div id="uploadProgressModal" class="modal-overlay" style="backdrop-filter: blur(4px);">
+    <div class="modal-box" style="max-width: 520px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 22px;">⬆️</span>
+                <div>
+                    <h3 style="font-size: 16px; font-weight: 700; margin: 0; line-height: 1.2;">Uploading Files</h3>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                        To: <span id="uploadTargetFolder" style="font-family: monospace; color: var(--accent);">/</span>
+                    </div>
+                </div>
+            </div>
+            <span id="uploadCountBadge" class="badge badge-info" style="font-size: 12px; font-weight: 600;">0 files</span>
+        </div>
+
+        <div class="upload-progress-container">
+            <!-- Percentage and Speed bar header -->
+            <div style="display: flex; align-items: baseline; justify-content: space-between;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span id="uploadSpinner" class="upload-spinner"></span>
+                    <span id="uploadPercentText" style="font-size: 22px; font-weight: 800; color: var(--accent); font-family: monospace;">0%</span>
+                    <span id="uploadStatusText" style="font-size: 12px; color: var(--text-secondary); margin-left: 4px;">Preparing upload...</span>
+                </div>
+                <div style="text-align: right;">
+                    <div id="uploadDetailsText" style="font-size: 12px; font-weight: 600; font-family: monospace; color: var(--text-primary);">0 B / 0 B</div>
+                    <div id="uploadSpeedText" style="font-size: 11px; color: var(--text-muted); font-family: monospace; margin-top: 2px;"></div>
+                </div>
+            </div>
+
+            <!-- Progress Bar -->
+            <div class="upload-progress-track">
+                <div id="uploadProgressBar" class="upload-progress-bar"></div>
+            </div>
+
+            <!-- Files list -->
+            <div>
+                <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 6px;">
+                    Queue
+                </div>
+                <div id="uploadFileList" class="upload-file-list"></div>
+            </div>
+
+            <!-- Action buttons -->
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px;">
+                <button type="button" id="uploadCancelBtn" onclick="cancelCurrentUpload()" class="btn btn-secondary" style="font-size: 12px; padding: 7px 16px;">
+                    Cancel Upload
+                </button>
+                <button type="button" id="uploadCloseBtn" onclick="closeModal('uploadProgressModal')" class="btn btn-primary" style="font-size: 12px; padding: 7px 16px; display: none;">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     const WEB_ROOT = "{{ web_root_str }}";
     const CURRENT_PATH = "{{ current_path }}";
@@ -670,29 +726,211 @@
         openModal("imagePreviewModal");
     }
 
-    // Multi-File Upload
-    async function handleMultiUpload(files) {
-        if (!files || files.length === 0) return;
+    // Upload Helpers & Multi-File Upload with Progress
+    let currentUploadXhr = null;
+
+    function getFileIcon(name) {
+        const ext = (name.split('.').pop() || '').toLowerCase();
+        if (['jpg','jpeg','png','gif','webp','svg','ico','bmp'].includes(ext)) return '🖼️';
+        if (['zip','tar','gz','rar','7z','bz2'].includes(ext)) return '📦';
+        if (['php','js','ts','py','html','css','sql','json','sh','env','conf','xml','yaml','yml'].includes(ext)) return '📜';
+        if (['mp3','wav','ogg','flac'].includes(ext)) return '🎵';
+        if (['mp4','mkv','avi','mov','webm'].includes(ext)) return '🎬';
+        if (['pdf'].includes(ext)) return '📕';
+        return '📄';
+    }
+
+    function formatUploadBytes(bytes) {
+        if (!bytes || bytes <= 0) return '0 B';
+        const k = 1024;
+        const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+        const i = Math.floor(Math.log(bytes) / Math.log(k));
+        return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+    }
+
+    function cancelCurrentUpload() {
+        if (currentUploadXhr) {
+            currentUploadXhr.abort();
+        } else {
+            closeModal('uploadProgressModal');
+        }
+    }
+
+    function handleUploadFailure(errMsg) {
+        const spinner = document.getElementById("uploadSpinner");
+        if (spinner) spinner.style.display = "none";
+        const bar = document.getElementById("uploadProgressBar");
+        if (bar) bar.style.background = "var(--danger)";
+        const statusEl = document.getElementById("uploadStatusText");
+        if (statusEl) statusEl.innerHTML = `<span style="color: var(--danger); font-weight: 600;">Failed:</span> ${errMsg}`;
+        const cancelBtn = document.getElementById("uploadCancelBtn");
+        if (cancelBtn) cancelBtn.style.display = "none";
+        const closeBtn = document.getElementById("uploadCloseBtn");
+        if (closeBtn) closeBtn.style.display = "inline-block";
+        showToast(errMsg, "danger");
+    }
+
+    async function handleMultiUpload(fileListInput) {
+        if (!fileListInput || fileListInput.length === 0) return;
+        const files = Array.from(fileListInput);
+
+        // Reset input element so selecting the same file triggers onchange next time
+        const fileInput = document.getElementById("multiUploadInput");
+        if (fileInput) fileInput.value = "";
+
         const formData = new FormData();
         formData.append("path", CURRENT_PATH);
 
-        for (let i = 0; i < files.length; i++) {
-            formData.append("files", files[i]);
-        }
+        const listContainer = document.getElementById("uploadFileList");
+        if (listContainer) listContainer.innerHTML = "";
 
-        showToast(`Uploading ${files.length} file(s)...`, "success");
-        try {
-            const res = await fetch("/file-manager/upload", { method: "POST", body: formData });
-            const data = await res.json();
-            if (data.success) {
-                showToast(data.message, "success");
-                setTimeout(() => location.reload(), 600);
-            } else {
-                showToast(data.error || "Upload failed", "danger");
+        let totalBytes = 0;
+        files.forEach((file, index) => {
+            formData.append("files", file);
+            totalBytes += file.size;
+
+            if (listContainer) {
+                const item = document.createElement("div");
+                item.className = "upload-file-item";
+                item.id = `upload-file-row-${index}`;
+                item.innerHTML = `
+                    <div style="display: flex; align-items: center; gap: 8px; overflow: hidden; max-width: 68%;">
+                        <span>${getFileIcon(file.name)}</span>
+                        <span style="font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${file.name}">${file.name}</span>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                        <span style="font-size: 11px; color: var(--text-muted); font-family: monospace;">${formatUploadBytes(file.size)}</span>
+                        <span class="badge badge-info" id="upload-status-badge-${index}" style="font-size: 10px; padding: 2px 8px;">Waiting</span>
+                    </div>
+                `;
+                listContainer.appendChild(item);
             }
-        } catch (e) {
-            showToast("Upload error: " + e, "danger");
-        }
+        });
+
+        // Initialize progress UI
+        document.getElementById("uploadCountBadge").innerText = `${files.length} file${files.length > 1 ? 's' : ''}`;
+        document.getElementById("uploadTargetFolder").innerText = CURRENT_PATH ? "/" + CURRENT_PATH : "/ (root)";
+        document.getElementById("uploadPercentText").innerText = "0%";
+        document.getElementById("uploadProgressBar").style.width = "0%";
+        document.getElementById("uploadProgressBar").style.background = "linear-gradient(90deg, #38bdf8 0%, #0284c7 100%)";
+        document.getElementById("uploadStatusText").innerText = "Uploading files...";
+        document.getElementById("uploadDetailsText").innerText = `0 B / ${formatUploadBytes(totalBytes)}`;
+        document.getElementById("uploadSpeedText").innerText = "";
+        document.getElementById("uploadCancelBtn").style.display = "inline-block";
+        document.getElementById("uploadCloseBtn").style.display = "none";
+        document.getElementById("uploadSpinner").style.display = "inline-block";
+
+        openModal("uploadProgressModal");
+
+        const xhr = new XMLHttpRequest();
+        currentUploadXhr = xhr;
+
+        const startTime = Date.now();
+        let lastLoaded = 0;
+        let lastTime = startTime;
+
+        xhr.upload.addEventListener("progress", function(e) {
+            if (e.lengthComputable) {
+                const percent = Math.min(Math.round((e.loaded / e.total) * 100), 99);
+                document.getElementById("uploadPercentText").innerText = `${percent}%`;
+                document.getElementById("uploadProgressBar").style.width = `${percent}%`;
+
+                const now = Date.now();
+                const timeDiff = (now - lastTime) / 1000;
+                if (timeDiff >= 0.25 || e.loaded === e.total) {
+                    const speed = (e.loaded - lastLoaded) / (timeDiff || 0.001);
+                    lastLoaded = e.loaded;
+                    lastTime = now;
+
+                    const speedFormatted = formatUploadBytes(speed) + "/s";
+                    const remainingBytes = e.total - e.loaded;
+                    const etaSeconds = speed > 0 ? Math.round(remainingBytes / speed) : 0;
+                    const etaFormatted = etaSeconds > 0 ? ` • ETA: ${etaSeconds}s` : "";
+
+                    document.getElementById("uploadSpeedText").innerText = `${speedFormatted}${etaFormatted}`;
+                }
+
+                document.getElementById("uploadDetailsText").innerText = `${formatUploadBytes(e.loaded)} / ${formatUploadBytes(e.total)}`;
+                
+                if (percent >= 99) {
+                    document.getElementById("uploadStatusText").innerText = "Saving to disk & setting permissions...";
+                } else {
+                    document.getElementById("uploadStatusText").innerText = "Uploading to server...";
+                }
+
+                // Update badges to in-progress
+                for (let i = 0; i < files.length; i++) {
+                    const badge = document.getElementById(`upload-status-badge-${i}`);
+                    if (badge && badge.innerText === "Waiting") {
+                        badge.innerText = "Uploading";
+                        badge.className = "badge badge-primary";
+                    }
+                }
+            }
+        });
+
+        xhr.onload = function() {
+            currentUploadXhr = null;
+            const spinner = document.getElementById("uploadSpinner");
+            if (spinner) spinner.style.display = "none";
+
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    const res = JSON.parse(xhr.responseText);
+                    if (res.success) {
+                        document.getElementById("uploadPercentText").innerText = "100%";
+                        document.getElementById("uploadProgressBar").style.width = "100%";
+                        document.getElementById("uploadProgressBar").style.background = "var(--success)";
+                        document.getElementById("uploadStatusText").innerText = "Upload completed successfully!";
+                        document.getElementById("uploadSpeedText").innerText = "Done";
+
+                        for (let i = 0; i < files.length; i++) {
+                            const badge = document.getElementById(`upload-status-badge-${i}`);
+                            if (badge) {
+                                badge.innerText = "Completed";
+                                badge.className = "badge badge-success";
+                            }
+                        }
+
+                        showToast(res.message || "Upload completed successfully", "success");
+                        setTimeout(() => {
+                            location.reload();
+                        }, 900);
+                    } else {
+                        handleUploadFailure(res.error || "Upload rejected by server.");
+                    }
+                } catch (err) {
+                    handleUploadFailure("Invalid server response: " + err.message);
+                }
+            } else {
+                let errorMsg = `Server error (HTTP ${xhr.status})`;
+                try {
+                    const errJson = JSON.parse(xhr.responseText);
+                    if (errJson && errJson.error) errorMsg = errJson.error;
+                    else if (errJson && errJson.detail) errorMsg = typeof errJson.detail === "string" ? errJson.detail : JSON.stringify(errJson.detail);
+                } catch (e) {}
+                handleUploadFailure(errorMsg);
+            }
+        };
+
+        xhr.onerror = function() {
+            currentUploadXhr = null;
+            handleUploadFailure("Network connection lost or server unreachable.");
+        };
+
+        xhr.onabort = function() {
+            currentUploadXhr = null;
+            const spinner = document.getElementById("uploadSpinner");
+            if (spinner) spinner.style.display = "none";
+            document.getElementById("uploadStatusText").innerText = "Upload cancelled.";
+            document.getElementById("uploadProgressBar").style.background = "var(--warning)";
+            document.getElementById("uploadCancelBtn").style.display = "none";
+            document.getElementById("uploadCloseBtn").style.display = "inline-block";
+            showToast("Upload cancelled", "warning");
+        };
+
+        xhr.open("POST", "/file-manager/upload", true);
+        xhr.send(formData);
     }
 
     // Single item delete

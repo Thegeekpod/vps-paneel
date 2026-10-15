@@ -35,9 +35,24 @@ def format_bytes(size: int) -> str:
     return f"{size} B"
 
 def resolve_safe_path(base_dir: Path, rel_path: str) -> Path:
-    clean = rel_path.strip().replace("../", "").replace("..\\", "").lstrip("/\\")
-    target = (base_dir / clean).resolve()
     base_resolved = base_dir.resolve()
+    rel_clean = (rel_path or "").strip().replace("\\", "/")
+    
+    # Check if rel_clean already has the base path prefixed (e.g. /www/wwwroot/... or relative www/wwwroot/...)
+    base_str = str(base_resolved).replace("\\", "/")
+    base_no_slash = base_str.lstrip("/")
+    
+    if rel_clean.startswith(base_str):
+        rel_clean = rel_clean[len(base_str):]
+    elif rel_clean.lstrip("/").startswith(base_no_slash):
+        rel_clean = rel_clean.lstrip("/")[len(base_no_slash):]
+    elif rel_clean.startswith("/www/wwwroot"):
+        rel_clean = rel_clean[len("/www/wwwroot"):]
+    elif rel_clean.startswith("www/wwwroot"):
+        rel_clean = rel_clean[len("www/wwwroot"):]
+
+    clean = rel_clean.replace("../", "").lstrip("/")
+    target = (base_resolved / clean).resolve()
     if not str(target).startswith(str(base_resolved)):
         raise HTTPException(status_code=403, detail="Access denied: Path traversal attempted")
     return target
@@ -327,33 +342,85 @@ async def batch_delete_items(
 @router.post("/upload")
 async def upload_files(
     request: Request,
-    files: List[UploadFile] = File(...),
-    path: str = Form(""),
-    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    target_dir = resolve_safe_path(WEB_ROOT, path)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    uploaded = []
+    try:
+        form = await request.form()
+        path = form.get("path", "")
+        if isinstance(path, UploadFile):
+            path = ""
+        else:
+            path = str(path or "").strip()
 
-    for file in files:
-        if not file.filename:
-            continue
-        dest = target_dir / file.filename
-        try:
-            with open(dest, "wb") as buffer:
-                shutil.copyfileobj(file.file, buffer)
+        target_dir = resolve_safe_path(WEB_ROOT, path)
+        target_dir.mkdir(parents=True, exist_ok=True)
+
+        file_list = form.getlist("files")
+        if not file_list:
+            file_list = form.getlist("files[]")
+        if not file_list:
+            file_list = form.getlist("file")
+        if not file_list:
+            single = form.get("file") or form.get("files")
+            if single:
+                file_list = [single]
+
+        uploaded = []
+        errors = []
+
+        for item in file_list:
+            if not isinstance(item, UploadFile):
+                continue
+            filename = item.filename
+            if not filename:
+                continue
+
+            safe_name = os.path.basename(filename.replace("\\", "/"))
+            if not safe_name:
+                continue
+
+            dest = target_dir / safe_name
             try:
-                os.chmod(dest, 0o664)
-                shutil.chown(dest, user="www-data", group="www-data")
-            except Exception:
-                pass
-            uploaded.append(file.filename)
-        except Exception as e:
-            return JSONResponse({"success": False, "error": f"Failed on {file.filename}: {e}"}, status_code=500)
+                with open(dest, "wb") as buffer:
+                    while True:
+                        chunk = await item.read(1024 * 1024)
+                        if not chunk:
+                            break
+                        buffer.write(chunk)
+                await item.close()
 
-    log_action(user["username"], "UploadFiles", f"Uploaded: {', '.join(uploaded)} to {path}", request.client.host)
-    return {"success": True, "message": f"Successfully uploaded {len(uploaded)} file(s)", "files": uploaded}
+                try:
+                    os.chmod(dest, 0o664)
+                    shutil.chown(dest, user="www-data", group="www-data")
+                except Exception:
+                    pass
+
+                uploaded.append(safe_name)
+            except Exception as e:
+                errors.append(f"{safe_name}: {str(e)}")
+
+        if not uploaded and errors:
+            return JSONResponse({"success": False, "error": f"Upload failed: {', '.join(errors)}"}, status_code=500)
+
+        if not uploaded:
+            return JSONResponse({"success": False, "error": "No valid files received for upload."}, status_code=400)
+
+        log_action(user["username"], "UploadFiles", f"Uploaded: {', '.join(uploaded)} to {path}", request.client.host)
+
+        msg = f"Successfully uploaded {len(uploaded)} file(s)"
+        if errors:
+            msg += f" (Some errors: {', '.join(errors)})"
+
+        return {
+            "success": True,
+            "message": msg,
+            "files": uploaded,
+            "errors": errors
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        return JSONResponse({"success": False, "error": f"Upload error: {str(e)}"}, status_code=500)
 
 @router.get("/download")
 async def download_file(
