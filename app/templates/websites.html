@@ -21,7 +21,6 @@
             <thead>
                 <tr>
                     <th>Domain</th>
-                    <th>Document Root</th>
                     <th>PHP</th>
                     <th>Status</th>
                     <th>SSL</th>
@@ -62,7 +61,6 @@
                             </div>
                         </div>
                     </td>
-                    <td><code>{{ site.root_dir }}</code></td>
                     <td><span class="badge badge-gray">PHP {{ site.php_version }}</span></td>
                     <td>
                         {% set curr_status = 'maintenance' if (site.is_maintenance or site.status == 'maintenance') else ('disabled' if site.status in ['disabled', 'deactivated'] else ('failed' if site.status == 'failed' else 'active')) %}
@@ -121,7 +119,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 40px;">
                         No websites created yet. Click <strong>+ Add Website</strong> to host your first site!
                     </td>
                 </tr>
