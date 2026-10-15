@@ -11,7 +11,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.auth import login_required
 from app.config import WEB_ROOT
 from app.database import get_db, log_action
-from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx
+from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx, restore_ssl_for_existing_domains
 from app.services.ssl_service import issue_ssl, remove_ssl
 from app.services.git_service import clone_repository, pull_repository
 from app.services.database_service import create_db_and_user, drop_db_and_user
@@ -26,6 +26,11 @@ async def list_websites(
     success: Optional[str] = None,
     user: dict = Depends(login_required)
 ):
+    try:
+        restore_ssl_for_existing_domains()
+    except Exception:
+        pass
+
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM websites ORDER BY id DESC")
@@ -626,6 +631,11 @@ async def fix_laravel_action(site_id: int, request: Request, user: dict = Depend
     cursor.execute("UPDATE websites SET project_type = 'laravel' WHERE id = ?", (site_id,))
     conn.commit()
     conn.close()
+
+    try:
+        restore_ssl_for_existing_domains()
+    except Exception:
+        pass
 
     log_action(user["username"], "FixLaravel", f"Domain: {domain}, Nginx: {vhost_msg}, Setup: {setup_msg}", get_client_ip(request))
     return JSONResponse({

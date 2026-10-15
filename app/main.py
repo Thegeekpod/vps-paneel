@@ -8,7 +8,7 @@ from fastapi.templating import Jinja2Templates
 from app.config import BASE_DIR, PANEL_PORT
 from app.database import init_db, get_db, hash_password, log_action
 from app.auth import create_access_token, get_current_user, COOKIE_NAME
-from app.services.nginx_service import ensure_default_catchall
+from app.services.nginx_service import ensure_default_catchall, restore_ssl_for_existing_domains
 from app.services.database_service import sync_database_accounts
 from app.templates_util import render
 from app.routes import dashboard, websites, filemanager, databases, services, settings, terminal
@@ -34,6 +34,10 @@ async def on_startup():
     init_db()
     ensure_default_catchall()
     sync_database_accounts()
+    try:
+        restore_ssl_for_existing_domains()
+    except Exception:
+        pass
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_view(request: Request):

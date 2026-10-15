@@ -64,12 +64,96 @@ def ensure_default_catchall():
     except Exception:
         pass
 
+def get_fpm_socket(php_version: str = "8.3") -> str:
+    candidates = [
+        f"/run/php/php{php_version}-fpm.sock",
+        f"/var/run/php/php{php_version}-fpm.sock",
+    ]
+    for c in candidates:
+        if Path(c).exists():
+            return c
+    for d in ["/run/php", "/var/run/php"]:
+        dp = Path(d)
+        if dp.exists():
+            socks = list(dp.glob("php*-fpm.sock"))
+            if socks:
+                return str(socks[0])
+    return f"/run/php/php{php_version}-fpm.sock"
+
+def get_existing_ssl_block(domain: str, vhost_file: Path) -> str:
+    """Returns Nginx SSL configuration block if Let's Encrypt certificate or existing SSL directives exist."""
+    fullchain = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+    privkey = Path(f"/etc/letsencrypt/live/{domain}/privkey.pem")
+    
+    if fullchain.exists() and privkey.exists():
+        return f"""
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    ssl_certificate {fullchain};
+    ssl_certificate_key {privkey};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+"""
+    if vhost_file.exists():
+        try:
+            content = vhost_file.read_text()
+            if "ssl_certificate" in content:
+                ssl_lines = [
+                    line.strip() for line in content.splitlines()
+                    if any(k in line for k in ["ssl_certificate", "ssl_protocols", "ssl_ciphers", "443 ssl"])
+                ]
+                if ssl_lines:
+                    return "\n    " + "\n    ".join(ssl_lines) + "\n"
+        except Exception:
+            pass
+    return ""
+
+def restore_ssl_for_existing_domains() -> bool:
+    """Scans all existing Let's Encrypt certificates and restores SSL in Nginx vhost configs if missing."""
+    if os.name == 'nt' or not NGINX_AVAILABLE.exists():
+        return False
+    letsencrypt_live = Path("/etc/letsencrypt/live")
+    if not letsencrypt_live.exists():
+        return False
+
+    modified = False
+    try:
+        for domain_dir in letsencrypt_live.iterdir():
+            if domain_dir.is_dir() and domain_dir.name != "README":
+                domain = domain_dir.name
+                fullchain = domain_dir / "fullchain.pem"
+                privkey = domain_dir / "privkey.pem"
+                if fullchain.exists() and privkey.exists():
+                    vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
+                    if vhost_file.exists():
+                        try:
+                            content = vhost_file.read_text()
+                            if "ssl_certificate" not in content and "server {" in content:
+                                ssl_block = f"""
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    ssl_certificate {fullchain};
+    ssl_certificate_key {privkey};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+"""
+                                new_content = content.replace("server {", "server {" + ssl_block, 1)
+                                vhost_file.write_text(new_content)
+                                modified = True
+                        except Exception:
+                            pass
+        if modified:
+            test_and_reload_nginx()
+    except Exception:
+        pass
+    return modified
+
 def create_vhost(domain: str, root_dir: str, php_version: str = "8.3", project_type: str = "php") -> Tuple[bool, str]:
     vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
     vhost_enabled = NGINX_ENABLED / f"{domain}.conf"
     
     # PHP-FPM socket path
-    fpm_socket = f"/run/php/php{php_version}-fpm.sock"
+    fpm_socket = get_fpm_socket(php_version)
     clean_root = root_dir.rstrip("/")
     if project_type == "laravel" and not clean_root.endswith("/public"):
         clean_root = f"{clean_root}/public"
@@ -165,7 +249,19 @@ def create_vhost(domain: str, root_dir: str, php_version: str = "8.3", project_t
     }}
 }}
 """
+    # Automatically preserve SSL if certificates exist on disk or previously in vhost
+    ssl_block = get_existing_ssl_block(domain, vhost_file)
+    if ssl_block and "server {" in config:
+        config = config.replace("server {", "server {" + ssl_block, 1)
+
     if os.name != 'nt' and NGINX_AVAILABLE.exists():
+        old_content = None
+        if vhost_file.exists():
+            try:
+                old_content = vhost_file.read_text()
+            except Exception:
+                pass
+
         try:
             vhost_file.write_text(config)
             if not vhost_enabled.exists():
@@ -180,8 +276,12 @@ def create_vhost(domain: str, root_dir: str, php_version: str = "8.3", project_t
             
             success, msg = test_and_reload_nginx()
             if not success:
-                vhost_enabled.unlink(missing_ok=True)
-                vhost_file.unlink(missing_ok=True)
+                if old_content:
+                    vhost_file.write_text(old_content)
+                    test_and_reload_nginx()
+                else:
+                    vhost_enabled.unlink(missing_ok=True)
+                    vhost_file.unlink(missing_ok=True)
                 return False, msg
             return True, "Nginx vhost created and active"
         except Exception as e:
