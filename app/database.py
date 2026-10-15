@@ -39,9 +39,21 @@ def init_db():
         status TEXT DEFAULT 'active',
         ssl_enabled INTEGER DEFAULT 0,
         ssl_expires_at TEXT,
+        git_repo TEXT,
+        git_branch TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+
+    # Migration for existing databases
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN git_repo TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN git_branch TEXT")
+    except Exception:
+        pass
 
     # Audit Logs Table
     cursor.execute('''

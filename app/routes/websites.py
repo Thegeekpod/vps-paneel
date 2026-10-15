@@ -1,4 +1,7 @@
 import shutil
+import urllib.parse
+from pathlib import Path
+from typing import Optional
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.auth import login_required
@@ -6,12 +9,18 @@ from app.config import WEB_ROOT
 from app.database import get_db, log_action
 from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx
 from app.services.ssl_service import issue_ssl
+from app.services.git_service import clone_repository, pull_repository
 from app.templates_util import render
 
 router = APIRouter(prefix="/websites")
 
 @router.get("", response_class=HTMLResponse)
-async def list_websites(request: Request, user: dict = Depends(login_required)):
+async def list_websites(
+    request: Request,
+    error: Optional[str] = None,
+    success: Optional[str] = None,
+    user: dict = Depends(login_required)
+):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM websites ORDER BY id DESC")
@@ -21,7 +30,9 @@ async def list_websites(request: Request, user: dict = Depends(login_required)):
     return render("websites.html", {
         "user": user,
         "websites": websites,
-        "active_nav": "websites"
+        "active_nav": "websites",
+        "error": error,
+        "success": success
     }, request)
 
 @router.post("/create")
@@ -29,19 +40,37 @@ async def create_website_action(
     request: Request,
     domain: str = Form(...),
     php_version: str = Form("8.3"),
+    git_repo: Optional[str] = Form(None),
+    git_branch: Optional[str] = Form(None),
     user: dict = Depends(login_required)
 ):
     domain = domain.strip().lower()
     if not domain or " " in domain:
-        raise HTTPException(status_code=400, detail="Invalid domain name")
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Invalid domain name provided')}", status_code=303)
 
     site_root = WEB_ROOT / domain
     site_root.mkdir(parents=True, exist_ok=True)
     
-    # Create default index.html if empty
-    index_file = site_root / "index.html"
-    if not index_file.exists():
-        index_file.write_text(f"""<!DOCTYPE html>
+    clean_git_repo = git_repo.strip() if git_repo else ""
+    clean_git_branch = git_branch.strip() if git_branch else ""
+
+    if clean_git_repo:
+        # Clone repository into document root
+        cloned, clone_msg = clone_repository(clean_git_repo, site_root, clean_git_branch)
+        if not cloned:
+            # If directory is empty, remove it to keep filesystem clean
+            try:
+                if not any(site_root.iterdir()):
+                    site_root.rmdir()
+            except Exception:
+                pass
+            log_action(user["username"], "CreateWebsiteFailed", f"Domain: {domain}, Git error: {clone_msg}", request.client.host)
+            return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Git clone failed: {clone_msg}')}", status_code=303)
+    else:
+        # Create default index.html if empty
+        index_file = site_root / "index.html"
+        if not index_file.exists():
+            index_file.write_text(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -73,23 +102,30 @@ async def create_website_action(
         pass
 
     # Create Nginx VirtualHost
-    success, msg = create_vhost(domain, str(site_root), php_version)
+    vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version)
 
     conn = get_db()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO websites (domain, root_dir, php_version, status) VALUES (?, ?, ?, ?)",
-            (domain, str(site_root), php_version, "active" if success else "failed")
+            "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch) VALUES (?, ?, ?, ?, ?, ?)",
+            (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None)
         )
         conn.commit()
     except Exception as e:
         conn.close()
-        raise HTTPException(status_code=400, detail=f"Website already exists: {e}")
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Website already exists or DB error: {e}')}", status_code=303)
     conn.close()
 
-    log_action(user["username"], "CreateWebsite", f"Domain: {domain}, Status: {'OK' if success else msg}", request.client.host)
-    return RedirectResponse(url="/websites", status_code=303)
+    action_details = f"Domain: {domain}, Status: {'OK' if vhost_success else vhost_msg}"
+    if clean_git_repo:
+        action_details += f", Git: {clean_git_repo}"
+    log_action(user["username"], "CreateWebsite", action_details, request.client.host)
+    
+    success_msg = f"Website {domain} created successfully!"
+    if clean_git_repo:
+        success_msg += " (Repository cloned)"
+    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(success_msg)}", status_code=303)
 
 @router.post("/{site_id}/delete")
 async def delete_website_action(site_id: int, request: Request, user: dict = Depends(login_required)):
@@ -147,4 +183,33 @@ async def sync_vhost_action(site_id: int, request: Request, user: dict = Depends
     conn.close()
 
     log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Result: {msg}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
+@router.post("/{site_id}/git-pull")
+async def pull_website_git(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    root_dir = site["root_dir"]
+    success, msg = pull_repository(root_dir)
+    
+    # Re-apply permissions if git pull modified/created files
+    if success:
+        try:
+            site_root = Path(root_dir)
+            shutil.chown(str(site_root), user="www-data", group="www-data")
+            for p in site_root.glob("**/*"):
+                try:
+                    shutil.chown(str(p), user="www-data", group="www-data")
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+    log_action(user["username"], "GitPull", f"Domain: {site['domain']}, Result: {msg}", request.client.host)
     return JSONResponse({"success": success, "message": msg})

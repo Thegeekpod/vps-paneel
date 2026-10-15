@@ -7,7 +7,7 @@
 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
     <div>
         <h2 style="font-size: 18px; font-weight: 600;">Hosted Websites</h2>
-        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Manage domain mapping, virtual hosts, and TLS certificates</p>
+        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Manage domain mapping, virtual hosts, Git repositories, and TLS certificates</p>
     </div>
     <button onclick="openModal('addSiteModal')" class="btn btn-primary">
         <span>+</span> Add Website
@@ -32,10 +32,20 @@
                 {% for site in websites %}
                 <tr>
                     <td>
-                        <a href="http://{{ site.domain }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
-                            {{ site.domain }}
-                            <span style="font-size: 10px;">↗</span>
-                        </a>
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <a href="http://{{ site.domain }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                                {{ site.domain }}
+                                <span style="font-size: 10px;">↗</span>
+                            </a>
+                            {% if site.git_repo %}
+                            <div>
+                                <a href="{{ site.git_repo }}" target="_blank" class="badge badge-gray" style="text-decoration: none; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="{{ site.git_repo }}">
+                                    <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                                    Git{% if site.git_branch %}: {{ site.git_branch }}{% endif %}
+                                </a>
+                            </div>
+                            {% endif %}
+                        </div>
                     </td>
                     <td><code>{{ site.root_dir }}</code></td>
                     <td><span class="badge badge-gray">PHP {{ site.php_version }}</span></td>
@@ -57,6 +67,11 @@
                     </td>
                     <td style="text-align: right;">
                         <div style="display: inline-flex; gap: 8px;">
+                            {% if site.git_repo %}
+                            <button onclick="pullGit({{ site.id }}, '{{ site.domain }}')" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;" title="Git Pull latest changes">
+                                🔄 Pull
+                            </button>
+                            {% endif %}
                             <a href="/file-manager?site_id={{ site.id }}" class="btn btn-secondary" style="padding: 4px 10px; font-size: 12px;">
                                 📁 Files
                             </a>
@@ -85,18 +100,18 @@
 
 <!-- Add Website Modal -->
 <div id="addSiteModal" class="modal-overlay">
-    <div class="modal-box">
+    <div class="modal-box" style="max-width: 500px;">
         <h3 style="font-size: 17px; font-weight: 600; margin-bottom: 6px;">Add New Website</h3>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Automatically provisions Nginx virtual host, web root, and default index.html</p>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Automatically provisions Nginx virtual host, web root, and optionally clones from GitHub</p>
 
-        <form method="POST" action="/websites/create">
+        <form id="addWebsiteForm" method="POST" action="/websites/create">
             <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
                 <input type="text" name="domain" placeholder="example.com" required>
                 <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Point your DNS A-record to this server IP first</span>
             </div>
 
-            <div style="margin-bottom: 24px;">
+            <div style="margin-bottom: 18px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
                 <select name="php_version">
                     <option value="8.3" selected>PHP 8.3 FPM (Recommended)</option>
@@ -105,9 +120,34 @@
                 </select>
             </div>
 
+            <!-- GitHub Integration (Optional) -->
+            <div style="border-top: 1px solid var(--border); margin: 18px 0 16px 0; padding-top: 16px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500; display: inline-flex; align-items: center; gap: 6px;">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                        GitHub Repository
+                    </label>
+                    <span class="badge badge-gray" style="font-size: 10px; font-weight: 500;">Optional</span>
+                </div>
+                <input type="text" name="git_repo" id="gitRepoInput" placeholder="https://github.com/username/repository.git">
+                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                    Optional: Public Git repo URL to automatically clone code into the website document root
+                </span>
+            </div>
+
+            <div style="margin-bottom: 24px;">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                    <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">
+                        Git Branch
+                    </label>
+                    <span class="badge badge-gray" style="font-size: 10px; font-weight: 500;">Optional</span>
+                </div>
+                <input type="text" name="git_branch" placeholder="main (default if left blank)">
+            </div>
+
             <div style="display: flex; justify-content: flex-end; gap: 10px;">
                 <button type="button" onclick="closeModal('addSiteModal')" class="btn btn-secondary">Cancel</button>
-                <button type="submit" class="btn btn-primary">Create Website</button>
+                <button type="submit" id="btnCreateSite" class="btn btn-primary">Create Website</button>
             </div>
         </form>
     </div>
@@ -116,6 +156,48 @@
 
 {% block scripts %}
 <script>
+// Check server flash messages or URL parameters
+document.addEventListener("DOMContentLoaded", function() {
+    {% if error %}
+    showToast("{{ error }}", "danger");
+    {% endif %}
+    {% if success %}
+    showToast("{{ success }}", "success");
+    {% endif %}
+});
+
+// Loading state on form submit
+const form = document.getElementById("addWebsiteForm");
+if (form) {
+    form.addEventListener("submit", function() {
+        const btn = document.getElementById("btnCreateSite");
+        const repoInput = document.getElementById("gitRepoInput");
+        if (btn) {
+            btn.disabled = true;
+            if (repoInput && repoInput.value.trim()) {
+                btn.innerHTML = `<span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Cloning & Creating...`;
+            } else {
+                btn.innerHTML = `<span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Creating...`;
+            }
+        }
+    });
+}
+
+async function pullGit(siteId, domain) {
+    showToast(`Pulling latest changes for ${domain}...`, 'success');
+    try {
+        const res = await fetch(`/websites/${siteId}/git-pull`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(`${domain}: ${data.message}`, 'success');
+        } else {
+            showToast(`${domain} pull error: ${data.message || data.error}`, 'danger');
+        }
+    } catch (e) {
+        showToast(`Failed to pull repository: ${e}`, 'danger');
+    }
+}
+
 async function issueSsl(siteId, domain) {
     if (!confirm(`Issue automated Let's Encrypt SSL certificate for ${domain}? Make sure DNS is already pointed to this server.`)) return;
     showToast(`Requesting SSL for ${domain}...`, 'success');
@@ -137,3 +219,4 @@ async function syncVhost(siteId, domain) {
 }
 </script>
 {% endblock %}
+
