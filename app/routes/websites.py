@@ -173,6 +173,15 @@ async def create_website_action(
     clean_git_branch = git_branch.strip() if git_branch else ""
 
     if clean_git_repo:
+        # If directory has leftover files from a previously deleted site, wipe it clean for fresh clone
+        if site_root.exists() and any(site_root.iterdir()):
+            try:
+                shutil.rmtree(str(site_root), ignore_errors=True)
+                subprocess.run(["rm", "-rf", str(site_root)], check=False, timeout=15)
+                site_root.mkdir(parents=True, exist_ok=True)
+            except Exception:
+                pass
+
         # Clone repository into document root
         cloned, clone_msg = clone_repository(clean_git_repo, site_root, clean_git_branch)
         if not cloned:
@@ -360,16 +369,28 @@ async def delete_website_action(
         remove_ssl(domain)
 
     # 3. Delete files if requested
-    if should_delete_files and root_dir_str:
-        try:
-            root_path = Path(root_dir_str).resolve()
-            # Safety guards: never delete root, system, or panel dirs
-            forbidden = ["/", "/var", "/var/www", "/www", "/www/wwwroot", "/root", "/home", "/etc", "/usr", "/tmp"]
-            if str(root_path) not in forbidden and len(str(root_path)) > 7:
-                if root_path.exists():
-                    shutil.rmtree(str(root_path), ignore_errors=True)
-        except Exception:
-            pass
+    if should_delete_files:
+        forbidden = ["/", "/var", "/var/www", "/www", "/www/wwwroot", "/root", "/home", "/etc", "/usr", "/tmp"]
+        targets_to_delete = []
+        if root_dir_str:
+            rp = Path(root_dir_str).resolve()
+            if rp.name == "public" and rp.parent != WEB_ROOT:
+                targets_to_delete.append(rp.parent)
+            targets_to_delete.append(rp)
+
+        # Also ensure /www/wwwroot/<domain> is cleaned
+        domain_folder = (WEB_ROOT / domain).resolve()
+        targets_to_delete.append(domain_folder)
+
+        for target in targets_to_delete:
+            try:
+                target_str = str(target)
+                if target_str not in forbidden and len(target_str) > 7:
+                    if target.exists():
+                        shutil.rmtree(target_str, ignore_errors=True)
+                        subprocess.run(["rm", "-rf", target_str], check=False, timeout=15)
+            except Exception:
+                pass
 
     # 4. Delete Database if requested
     if should_delete_db:

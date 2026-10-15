@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import zipfile
 import json
 from datetime import datetime
@@ -100,27 +101,32 @@ async def file_manager_view(
     websites = [dict(row) for row in cursor.fetchall()]
     conn.close()
 
-    selected_site = None
-    if site_id:
-        selected_site = next((s for s in websites if s["id"] == site_id), None)
-    if not selected_site and websites:
-        selected_site = websites[0]
+    # If site_id is passed and path is not specified, navigate directly to that site's folder
+    if site_id and not path:
+        matched = next((s for s in websites if s["id"] == site_id), None)
+        if matched:
+            try:
+                site_p = Path(matched["root_dir"]).resolve()
+                wr = WEB_ROOT.resolve()
+                if str(site_p).startswith(str(wr)) and site_p != wr:
+                    path = str(site_p.relative_to(wr))
+                else:
+                    path = matched["domain"]
+            except Exception:
+                path = matched["domain"]
+
+    WEB_ROOT.mkdir(parents=True, exist_ok=True)
+    clean_path = path.strip("/\\").replace("\\", "/")
+    current_dir = resolve_safe_path(WEB_ROOT, clean_path)
 
     items = []
-    current_root = WEB_ROOT
-    if selected_site:
-        current_root = Path(selected_site["root_dir"])
-        current_root.mkdir(parents=True, exist_ok=True)
-
-    current_dir = resolve_safe_path(current_root, path)
-
     if current_dir.exists() and current_dir.is_dir():
         for entry in sorted(os.scandir(current_dir), key=lambda e: (not e.is_dir(), e.name.lower())):
-            items.append(get_file_metadata(entry, path))
+            items.append(get_file_metadata(entry, clean_path))
 
-    # Breadcrumbs generator
+    # Breadcrumbs generator: root is always /www/wwwroot
     breadcrumbs = []
-    parts = [p for p in path.strip("/").split("/") if p]
+    parts = [p for p in clean_path.split("/") if p]
     accumulated = ""
     for p in parts:
         accumulated = f"{accumulated}/{p}".lstrip("/")
@@ -129,28 +135,20 @@ async def file_manager_view(
     return render("filemanager.html", {
         "user": user,
         "websites": websites,
-        "selected_site": selected_site,
-        "current_path": path.strip("/"),
+        "current_path": clean_path,
         "breadcrumbs": breadcrumbs,
         "items": items,
-        "active_nav": "filemanager"
+        "active_nav": "filemanager",
+        "web_root_str": str(WEB_ROOT)
     }, request)
 
 @router.get("/read")
 async def read_file(
-    site_id: int,
     path: str,
+    site_id: Optional[int] = None,
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    target = resolve_safe_path(Path(site["root_dir"]), path)
+    target = resolve_safe_path(WEB_ROOT, path)
     if not target.exists() or not target.is_file():
         return JSONResponse({"success": False, "error": "File not found"}, status_code=404)
 
@@ -169,20 +167,12 @@ async def read_file(
 @router.post("/save")
 async def save_file(
     request: Request,
-    site_id: int = Form(...),
     path: str = Form(...),
     content: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    target = resolve_safe_path(Path(site["root_dir"]), path)
+    target = resolve_safe_path(WEB_ROOT, path)
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
@@ -199,35 +189,30 @@ async def save_file(
 @router.post("/create-file")
 async def create_new_file(
     request: Request,
-    site_id: int = Form(...),
-    path: str = Form(""),
     filename: str = Form(...),
+    path: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
     clean_name = filename.strip().replace("/", "").replace("\\", "")
     if not clean_name:
         return JSONResponse({"success": False, "error": "Invalid filename"}, status_code=400)
 
-    target = resolve_safe_path(Path(site["root_dir"]), f"{path}/{clean_name}")
+    clean_path = path.strip("/\\")
+    full_rel = f"{clean_path}/{clean_name}" if clean_path else clean_name
+    target = resolve_safe_path(WEB_ROOT, full_rel)
     if target.exists():
         return JSONResponse({"success": False, "error": "File already exists"}, status_code=400)
 
     try:
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("", encoding="utf-8")
         try:
             os.chmod(target, 0o664)
             shutil.chown(target, user="www-data", group="www-data")
         except Exception:
             pass
-        log_action(user["username"], "CreateFile", f"File: {clean_name} in {path}", request.client.host)
+        log_action(user["username"], "CreateFile", f"File: {clean_name} in {clean_path}", request.client.host)
         return {"success": True, "message": f"Created {clean_name}"}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -235,24 +220,18 @@ async def create_new_file(
 @router.post("/create-folder")
 async def create_new_folder(
     request: Request,
-    site_id: int = Form(...),
-    path: str = Form(""),
     foldername: str = Form(...),
+    path: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
     clean_name = foldername.strip().replace("/", "").replace("\\", "")
     if not clean_name:
         return JSONResponse({"success": False, "error": "Invalid folder name"}, status_code=400)
 
-    target = resolve_safe_path(Path(site["root_dir"]), f"{path}/{clean_name}")
+    clean_path = path.strip("/\\")
+    full_rel = f"{clean_path}/{clean_name}" if clean_path else clean_name
+    target = resolve_safe_path(WEB_ROOT, full_rel)
     try:
         target.mkdir(parents=True, exist_ok=True)
         try:
@@ -260,7 +239,7 @@ async def create_new_folder(
             shutil.chown(target, user="www-data", group="www-data")
         except Exception:
             pass
-        log_action(user["username"], "CreateFolder", f"Folder: {clean_name} in {path}", request.client.host)
+        log_action(user["username"], "CreateFolder", f"Folder: {clean_name} in {clean_path}", request.client.host)
         return {"success": True, "message": f"Created folder {clean_name}"}
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
@@ -268,24 +247,16 @@ async def create_new_folder(
 @router.post("/rename")
 async def rename_item(
     request: Request,
-    site_id: int = Form(...),
     old_path: str = Form(...),
     new_name: str = Form(...),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
     clean_name = new_name.strip().replace("/", "").replace("\\", "")
     if not clean_name:
         return JSONResponse({"success": False, "error": "New name cannot be empty"}, status_code=400)
 
-    target = resolve_safe_path(Path(site["root_dir"]), old_path)
+    target = resolve_safe_path(WEB_ROOT, old_path)
     if not target.exists():
         return JSONResponse({"success": False, "error": "Source item not found"}, status_code=404)
 
@@ -303,27 +274,20 @@ async def rename_item(
 @router.post("/delete")
 async def delete_item(
     request: Request,
-    site_id: int = Form(...),
     path: str = Form(...),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    target = resolve_safe_path(Path(site["root_dir"]), path)
+    target = resolve_safe_path(WEB_ROOT, path)
     if not target.exists():
         return JSONResponse({"success": False, "error": "Item not found"}, status_code=404)
 
     try:
         if target.is_dir():
-            shutil.rmtree(target)
+            shutil.rmtree(str(target), ignore_errors=True)
+            subprocess.run(["rm", "-rf", str(target)], check=False, timeout=15)
         else:
-            target.unlink()
+            target.unlink(missing_ok=True)
         log_action(user["username"], "DeleteItem", f"Deleted {path}", request.client.host)
         return {"success": True, "message": "Deleted successfully"}
     except Exception as e:
@@ -332,18 +296,10 @@ async def delete_item(
 @router.post("/batch-delete")
 async def batch_delete_items(
     request: Request,
-    site_id: int = Form(...),
-    paths: str = Form(...), # JSON array of paths
+    paths: str = Form(...),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
     try:
         path_list = json.loads(paths)
     except Exception:
@@ -351,16 +307,16 @@ async def batch_delete_items(
 
     deleted_count = 0
     errors = []
-    base_dir = Path(site["root_dir"])
 
     for p in path_list:
         try:
-            target = resolve_safe_path(base_dir, p)
+            target = resolve_safe_path(WEB_ROOT, p)
             if target.exists():
                 if target.is_dir():
-                    shutil.rmtree(target)
+                    shutil.rmtree(str(target), ignore_errors=True)
+                    subprocess.run(["rm", "-rf", str(target)], check=False, timeout=15)
                 else:
-                    target.unlink()
+                    target.unlink(missing_ok=True)
                 deleted_count += 1
         except Exception as e:
             errors.append(f"{p}: {str(e)}")
@@ -371,20 +327,13 @@ async def batch_delete_items(
 @router.post("/upload")
 async def upload_files(
     request: Request,
-    site_id: int = Form(...),
-    path: str = Form(""),
     files: List[UploadFile] = File(...),
+    path: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    target_dir = resolve_safe_path(Path(site["root_dir"]), path)
+    target_dir = resolve_safe_path(WEB_ROOT, path)
+    target_dir.mkdir(parents=True, exist_ok=True)
     uploaded = []
 
     for file in files:
@@ -403,24 +352,16 @@ async def upload_files(
         except Exception as e:
             return JSONResponse({"success": False, "error": f"Failed on {file.filename}: {e}"}, status_code=500)
 
-    log_action(user["username"], "UploadFiles", f"Uploaded: {', '.join(uploaded)}", request.client.host)
+    log_action(user["username"], "UploadFiles", f"Uploaded: {', '.join(uploaded)} to {path}", request.client.host)
     return {"success": True, "message": f"Successfully uploaded {len(uploaded)} file(s)", "files": uploaded}
 
 @router.get("/download")
 async def download_file(
-    site_id: int,
     path: str,
+    site_id: Optional[int] = None,
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        raise HTTPException(status_code=404, detail="Website not found")
-
-    target = resolve_safe_path(Path(site["root_dir"]), path)
+    target = resolve_safe_path(WEB_ROOT, path)
     if not target.exists() or not target.is_file():
         raise HTTPException(status_code=404, detail="File not found")
 
@@ -429,21 +370,13 @@ async def download_file(
 @router.post("/chmod")
 async def change_permissions(
     request: Request,
-    site_id: int = Form(...),
     path: str = Form(...),
-    perms: str = Form(...), # e.g. "0755" or "0644"
+    perms: str = Form(...),
     recursive: bool = Form(False),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    target = resolve_safe_path(Path(site["root_dir"]), path)
+    target = resolve_safe_path(WEB_ROOT, path)
     if not target.exists():
         return JSONResponse({"success": False, "error": "Item not found"}, status_code=404)
 
@@ -464,31 +397,21 @@ async def change_permissions(
 @router.post("/unzip")
 async def extract_archive(
     request: Request,
-    site_id: int = Form(...),
     zip_path: str = Form(...),
     dest_path: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    base_dir = Path(site["root_dir"])
-    target_zip = resolve_safe_path(base_dir, zip_path)
+    target_zip = resolve_safe_path(WEB_ROOT, zip_path)
     if not target_zip.exists() or not target_zip.is_file():
         return JSONResponse({"success": False, "error": "Zip file not found"}, status_code=404)
 
-    target_dest = resolve_safe_path(base_dir, dest_path if dest_path else str(Path(zip_path).parent))
+    target_dest = resolve_safe_path(WEB_ROOT, dest_path if dest_path else str(Path(zip_path).parent))
     target_dest.mkdir(parents=True, exist_ok=True)
 
     try:
         with zipfile.ZipFile(target_zip, 'r') as zf:
             for member in zf.infolist():
-                # Prevent Zip Slip directory traversal
                 extracted_path = (target_dest / member.filename).resolve()
                 if not str(extracted_path).startswith(str(target_dest.resolve())):
                     continue
@@ -507,26 +430,17 @@ async def extract_archive(
 @router.post("/zip")
 async def compress_archive(
     request: Request,
-    site_id: int = Form(...),
-    paths: str = Form(...), # JSON list of relative paths
+    paths: str = Form(...),
     zip_name: str = Form(...),
     current_dir: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
     clean_zip = zip_name.strip()
     if not clean_zip.endswith(".zip"):
         clean_zip += ".zip"
 
-    base_dir = Path(site["root_dir"])
-    dest_dir = resolve_safe_path(base_dir, current_dir)
+    dest_dir = resolve_safe_path(WEB_ROOT, current_dir)
     out_zip = dest_dir / clean_zip
 
     try:
@@ -537,7 +451,7 @@ async def compress_archive(
     try:
         with zipfile.ZipFile(out_zip, 'w', zipfile.ZIP_DEFLATED) as zf:
             for p in path_list:
-                item_path = resolve_safe_path(base_dir, p)
+                item_path = resolve_safe_path(WEB_ROOT, p)
                 if not item_path.exists():
                     continue
                 if item_path.is_dir():
@@ -563,18 +477,11 @@ async def compress_archive(
 @router.post("/fix-permissions")
 async def fix_permissions(
     request: Request,
-    site_id: int = Form(...),
+    path: str = Form(""),
+    site_id: Optional[int] = Form(None),
     user: dict = Depends(login_required)
 ):
-    conn = get_db()
-    cursor = conn.cursor()
-    cursor.execute("SELECT root_dir FROM websites WHERE id = ?", (site_id,))
-    site = cursor.fetchone()
-    conn.close()
-    if not site:
-        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
-
-    root = Path(site["root_dir"])
+    root = resolve_safe_path(WEB_ROOT, path)
     try:
         for p in root.rglob("*"):
             try:

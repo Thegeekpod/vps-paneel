@@ -94,33 +94,31 @@
 <!-- Top Toolbar -->
 <div class="card" style="margin-bottom: 18px;">
     <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 14px;">
-        <!-- Left: Website Selector -->
-        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
-            <span style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em;">Website:</span>
-            <select onchange="location.href='/file-manager?site_id=' + this.value" style="width: auto; min-width: 200px; height: 36px; font-size: 13px; font-weight: 600;">
+        <!-- Left: Quick Navigation & Website Selector -->
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <a href="/file-manager" class="btn btn-secondary" style="font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; gap: 6px;">
+                <span>📁</span> All Files ({{ web_root_str }})
+            </a>
+            {% if websites %}
+            <select onchange="if(this.value !== undefined) location.href='/file-manager?path=' + encodeURIComponent(this.value)" style="width: auto; min-width: 220px; height: 36px; font-size: 13px; font-weight: 600;">
+                <option value="">Jump to Website Folder ▾</option>
                 {% for site in websites %}
-                <option value="{{ site.id }}" {% if selected_site and selected_site.id == site.id %}selected{% endif %}>
-                    {{ site.domain }}
+                <option value="{{ site.domain }}" {% if current_path == site.domain or current_path.startswith(site.domain ~ '/') %}selected{% endif %}>
+                    🌐 {{ site.domain }}
                 </option>
-                {% else %}
-                <option value="">No websites created yet</option>
                 {% endfor %}
             </select>
-            {% if selected_site %}
-            <span class="badge badge-success" title="Runs as root daemon with www-data compatibility">● Root Daemon Active</span>
             {% endif %}
+            <span class="badge badge-success" title="Runs as root daemon with www-data compatibility">● Root Daemon Active</span>
         </div>
 
         <!-- Search input -->
-        {% if selected_site %}
         <div class="search-box">
             <span class="search-icon">🔍</span>
-            <input type="text" id="filterInput" placeholder="Filter files..." onkeyup="filterFiles()">
+            <input type="text" id="filterInput" placeholder="Filter files in folder..." onkeyup="filterFiles()">
         </div>
-        {% endif %}
 
         <!-- Right: Actions -->
-        {% if selected_site %}
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
             <button onclick="openModal('newFileModal')" class="btn btn-primary" style="font-size: 12px; padding: 7px 14px;">
                 <span>+</span> New File
@@ -136,11 +134,9 @@
                 <span>🛡️</span> Repair Permissions
             </button>
         </div>
-        {% endif %}
     </div>
 </div>
 
-{% if selected_site %}
 <!-- Drag & Drop Overlay Zone -->
 <div id="dropZone" class="dropzone-overlay" style="margin-bottom: 18px; display: none;" onclick="document.getElementById('multiUploadInput').click()">
     <div style="font-size: 28px; margin-bottom: 8px;">📤</div>
@@ -152,10 +148,10 @@
 <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid var(--border); border-radius: 10px; padding: 12px 18px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-family: monospace;">
     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
         <span style="color: var(--text-muted);">Path:</span>
-        <a href="/file-manager?site_id={{ selected_site.id }}" class="breadcrumb-item">/www/wwwroot/{{ selected_site.domain }}</a>
+        <a href="/file-manager" class="breadcrumb-item">{{ web_root_str }}</a>
         {% for b in breadcrumbs %}
         <span style="color: var(--text-muted);">/</span>
-        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ b.path }}" class="breadcrumb-item">{{ b.name }}</a>
+        <a href="/file-manager?path={{ b.path }}" class="breadcrumb-item">{{ b.name }}</a>
         {% endfor %}
     </div>
     <div style="display: flex; align-items: center; gap: 10px;">
@@ -240,7 +236,7 @@
                 <tr>
                     <td></td>
                     <td colspan="5">
-                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ '/'.join(current_path.split('/')[:-1]) }}" style="color: var(--accent); text-decoration: none; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;">
+                        <a href="/file-manager?path={{ '/'.join(current_path.split('/')[:-1]) }}" style="color: var(--accent); text-decoration: none; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;">
                             <span class="fm-icon fm-icon-dir">📁</span> .. (Up to Parent Directory)
                         </a>
                     </td>
@@ -255,7 +251,7 @@
                     </td>
                     <td>
                         {% if item.is_dir %}
-                        <a href="/file-manager?site_id={{ selected_site.id }}&path={{ item.rel_path }}" style="color: #38bdf8; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center;">
+                        <a href="/file-manager?path={{ item.rel_path }}" style="color: #38bdf8; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center;">
                             <span class="fm-icon fm-icon-dir">📁</span> {{ item.name }}
                         </a>
                         {% else %}
@@ -310,7 +306,7 @@
                             {% endif %}
 
                             {% if not item.is_dir %}
-                            <a href="/file-manager/download?site_id={{ selected_site.id }}&path={{ item.rel_path }}" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Download file">
+                            <a href="/file-manager/download?path={{ item.rel_path }}" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" title="Download file">
                                 ⬇️
                             </a>
                             {% endif %}
@@ -477,7 +473,7 @@
 </div>
 
 <script>
-    const SITE_ID = {{ selected_site.id }};
+    const WEB_ROOT = "{{ web_root_str }}";
     const CURRENT_PATH = "{{ current_path }}";
     let aceEditor = null;
     let editingFilePath = "";
@@ -516,17 +512,22 @@
         // Global Drag & Drop handling
         window.addEventListener("dragover", function(e) {
             e.preventDefault();
-            document.getElementById("dropZone").style.display = "block";
-            document.getElementById("dropZone").classList.add("dragover");
+            const dz = document.getElementById("dropZone");
+            if (dz) {
+                dz.style.display = "block";
+                dz.classList.add("dragover");
+            }
         });
         window.addEventListener("dragleave", function(e) {
             if (e.clientX <= 0 || e.clientY <= 0) {
-                document.getElementById("dropZone").classList.remove("dragover");
+                const dz = document.getElementById("dropZone");
+                if (dz) dz.classList.remove("dragover");
             }
         });
         window.addEventListener("drop", function(e) {
             e.preventDefault();
-            document.getElementById("dropZone").classList.remove("dragover");
+            const dz = document.getElementById("dropZone");
+            if (dz) dz.classList.remove("dragover");
             if (e.dataTransfer && e.dataTransfer.files.length > 0) {
                 handleMultiUpload(e.dataTransfer.files);
             }
@@ -535,13 +536,13 @@
 
     function toggleDropZone() {
         const dz = document.getElementById("dropZone");
-        dz.style.display = dz.style.display === "none" ? "block" : "none";
+        if (dz) dz.style.display = dz.style.display === "none" ? "block" : "none";
     }
 
     function copyCurrentPath() {
-        const full = "/www/wwwroot/{{ selected_site.domain }}/" + CURRENT_PATH;
-        navigator.clipboard.writeText(full.replace("//", "/"));
-        showToast("Path copied to clipboard!", "success");
+        const full = WEB_ROOT + (CURRENT_PATH ? "/" + CURRENT_PATH : "");
+        navigator.clipboard.writeText(full);
+        showToast("Path copied to clipboard: " + full, "success");
     }
 
     // Realtime file filter
@@ -565,7 +566,7 @@
     // Edit File in Ace
     async function editFile(path, filename, ext) {
         try {
-            const res = await fetch(`/file-manager/read?site_id=${SITE_ID}&path=${encodeURIComponent(path)}`);
+            const res = await fetch(`/file-manager/read?path=${encodeURIComponent(path)}`);
             const data = await res.json();
             if (!data.success) {
                 showToast(data.error || "Failed to load file", "danger");
@@ -610,7 +611,6 @@
             aceEditor.setValue(data.content, -1);
             document.getElementById("editorContainer").style.display = "block";
             
-            // Force Ace to re-measure character dimensions when becoming visible
             aceEditor.resize(true);
             setTimeout(() => {
                 aceEditor.resize(true);
@@ -631,7 +631,6 @@
         statusSpan.innerText = "Saving...";
 
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("path", editingFilePath);
         formData.append("content", aceEditor.getValue());
 
@@ -667,7 +666,7 @@
     // Image preview
     function previewImage(path, filename) {
         document.getElementById("imagePreviewTitle").innerText = filename;
-        document.getElementById("imagePreviewImg").src = `/file-manager/download?site_id=${SITE_ID}&path=${encodeURIComponent(path)}`;
+        document.getElementById("imagePreviewImg").src = `/file-manager/download?path=${encodeURIComponent(path)}`;
         openModal("imagePreviewModal");
     }
 
@@ -675,7 +674,6 @@
     async function handleMultiUpload(files) {
         if (!files || files.length === 0) return;
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("path", CURRENT_PATH);
 
         for (let i = 0; i < files.length; i++) {
@@ -701,7 +699,6 @@
     async function deleteSingleItem(path) {
         if (!confirm(`Are you sure you want to permanently delete: ${path}?`)) return;
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("path", path);
 
         const res = await fetch("/file-manager/delete", { method: "POST", body: formData });
@@ -727,7 +724,6 @@
         if (!newName) return;
 
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("old_path", oldPath);
         formData.append("new_name", newName);
 
@@ -789,7 +785,6 @@
         const recursive = document.getElementById("chmodRecursive").checked;
 
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("path", path);
         formData.append("perms", perms);
         formData.append("recursive", recursive);
@@ -817,7 +812,6 @@
 
         showToast("Extracting archive...", "success");
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("zip_path", zipPath);
         formData.append("dest_path", dest);
 
@@ -846,7 +840,6 @@
 
         showToast("Compressing files...", "success");
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("paths", JSON.stringify(selected));
         formData.append("zip_name", zipName);
         formData.append("current_dir", CURRENT_PATH);
@@ -906,7 +899,6 @@
         if (!confirm(`Are you sure you want to delete ${selected.length} selected items?`)) return;
 
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("paths", JSON.stringify(selected));
 
         const res = await fetch("/file-manager/batch-delete", { method: "POST", body: formData });
@@ -924,7 +916,6 @@
         const name = document.getElementById("newFileNameInput").value.trim();
         if (!name) return;
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("path", CURRENT_PATH);
         formData.append("filename", name);
 
@@ -942,7 +933,6 @@
         const name = document.getElementById("newFolderNameInput").value.trim();
         if (!name) return;
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
         formData.append("path", CURRENT_PATH);
         formData.append("foldername", name);
 
@@ -958,9 +948,9 @@
 
     // Fix permissions
     async function fixPerms() {
-        if (!confirm("This will safely reset all files & directories in this website to 775/664 owned by www-data. Proceed?")) return;
+        if (!confirm("This will safely reset all files & directories in the current folder to 775/664 owned by www-data. Proceed?")) return;
         const formData = new FormData();
-        formData.append("site_id", SITE_ID);
+        formData.append("path", CURRENT_PATH);
 
         showToast("Repairing permissions...", "success");
         const res = await fetch("/file-manager/fix-permissions", { method: "POST", body: formData });
@@ -973,5 +963,4 @@
         }
     }
 </script>
-{% endif %}
 {% endblock %}
