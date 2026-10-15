@@ -534,11 +534,70 @@ async def sync_vhost_action(site_id: int, request: Request, user: dict = Depends
 
     site_keys = site.keys()
     project_type = site["project_type"] if "project_type" in site_keys and site["project_type"] else "php"
-    success, msg = create_vhost(site["domain"], site["root_dir"], site["php_version"], project_type)
+    redirect_url = site["redirect_url"] if "redirect_url" in site_keys else None
+    redirect_type = site["redirect_type"] if "redirect_type" in site_keys and site["redirect_type"] else 301
+    is_maintenance = bool(site["is_maintenance"]) if "is_maintenance" in site_keys else False
+
+    success, msg = create_vhost(
+        site["domain"],
+        site["root_dir"],
+        site["php_version"],
+        project_type,
+        redirect_url=redirect_url,
+        redirect_type=redirect_type,
+        is_maintenance=is_maintenance
+    )
     conn.close()
 
     log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Preset: {project_type}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": success, "message": msg})
+
+@router.post("/{site_id}/toggle-maintenance")
+async def toggle_maintenance_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    if not site:
+        conn.close()
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    site_keys = site.keys()
+    current_status = bool(site["is_maintenance"]) if "is_maintenance" in site_keys else False
+    new_status = not current_status
+
+    domain = site["domain"]
+    root_dir = site["root_dir"]
+    php_version = site["php_version"] or "8.3"
+    project_type = site["project_type"] if "project_type" in site_keys and site["project_type"] else "php"
+    redirect_url = site["redirect_url"] if "redirect_url" in site_keys else None
+    redirect_type = site["redirect_type"] if "redirect_type" in site_keys and site["redirect_type"] else 301
+
+    vhost_success, vhost_msg = create_vhost(
+        domain,
+        root_dir,
+        php_version=php_version,
+        project_type=project_type,
+        redirect_url=redirect_url,
+        redirect_type=redirect_type,
+        is_maintenance=new_status
+    )
+
+    if not vhost_success:
+        conn.close()
+        return JSONResponse({"success": False, "error": f"Failed to update Nginx: {vhost_msg}"}, status_code=500)
+
+    cursor.execute("UPDATE websites SET is_maintenance = ? WHERE id = ?", (1 if new_status else 0, site_id))
+    conn.commit()
+    conn.close()
+
+    status_label = "enabled" if new_status else "disabled"
+    log_action(user["username"], "ToggleMaintenance", f"Domain: {domain}, Status: {status_label}", get_client_ip(request))
+    return JSONResponse({
+        "success": True,
+        "is_maintenance": new_status,
+        "message": f"Maintenance mode {status_label} for {domain}"
+    })
 
 @router.post("/{site_id}/git-pull")
 async def pull_website_git(site_id: int, request: Request, user: dict = Depends(login_required)):
@@ -581,6 +640,8 @@ async def update_website_settings(
     root_dir: str = Form(...),
     php_version: str = Form("8.3"),
     project_type: str = Form("php"),
+    redirect_url: Optional[str] = Form(None),
+    redirect_type: int = Form(301),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
     db_name: Optional[str] = Form(None),
@@ -614,9 +675,21 @@ async def update_website_settings(
     clean_git_repo = git_repo.strip() if git_repo else ""
     clean_git_branch = git_branch.strip() if git_branch else ""
     clean_db_name = db_name.strip() if db_name and db_name.strip() else None
+    clean_redirect_url = redirect_url.strip() if redirect_url and redirect_url.strip() else None
+    
+    site_keys = site.keys()
+    is_maintenance = bool(site["is_maintenance"]) if "is_maintenance" in site_keys else False
 
-    # Reconfigure Nginx vhost with new root_dir, php_version, and project_type
-    vhost_success, vhost_msg = create_vhost(domain, str(new_root), php_version, project_type)
+    # Reconfigure Nginx vhost with new settings
+    vhost_success, vhost_msg = create_vhost(
+        domain,
+        str(new_root),
+        php_version=php_version,
+        project_type=project_type,
+        redirect_url=clean_redirect_url,
+        redirect_type=redirect_type,
+        is_maintenance=is_maintenance
+    )
     if not vhost_success:
         conn.close()
         return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Nginx configuration failed: {vhost_msg}')}", status_code=303)
@@ -636,14 +709,14 @@ async def update_website_settings(
         setup_laravel_environment(new_root, clean_db_name, php_version=php_version)
 
     cursor.execute(
-        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ? WHERE id = ?",
-        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, site_id)
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, site_id)
     )
     conn.commit()
     conn.close()
 
-    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, PHP: {php_version}", get_client_ip(request))
-    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain} ({project_type.capitalize()})')}", status_code=303)
+    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, Redirect: {clean_redirect_url}", get_client_ip(request))
+    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain}')}", status_code=303)
 
 @router.post("/{site_id}/fix-laravel")
 async def fix_laravel_action(site_id: int, request: Request, user: dict = Depends(login_required)):
@@ -660,6 +733,9 @@ async def fix_laravel_action(site_id: int, request: Request, user: dict = Depend
     php_version = site["php_version"] or "8.3"
     site_keys = site.keys()
     db_name = site["db_name"] if "db_name" in site_keys else None
+    redirect_url = site["redirect_url"] if "redirect_url" in site_keys else None
+    redirect_type = site["redirect_type"] if "redirect_type" in site_keys and site["redirect_type"] else 301
+    is_maintenance = bool(site["is_maintenance"]) if "is_maintenance" in site_keys else False
 
     # Fetch DB credentials if present
     db_user = None
@@ -672,7 +748,15 @@ async def fix_laravel_action(site_id: int, request: Request, user: dict = Depend
             db_pass = db_row["db_pass"]
 
     # 1. Update Nginx vhost with Laravel preset
-    vhost_ok, vhost_msg = create_vhost(domain, root_dir, php_version, "laravel")
+    vhost_ok, vhost_msg = create_vhost(
+        domain,
+        root_dir,
+        php_version=php_version,
+        project_type="laravel",
+        redirect_url=redirect_url,
+        redirect_type=redirect_type,
+        is_maintenance=is_maintenance
+    )
 
     # 2. Run Laravel environment setup (storage, bootstrap/cache, 775, .env, artisan)
     setup_ok, setup_msg = setup_laravel_environment(

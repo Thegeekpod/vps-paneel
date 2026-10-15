@@ -64,6 +64,18 @@ def init_db():
         cursor.execute("ALTER TABLE websites ADD COLUMN project_type TEXT DEFAULT 'php'")
     except Exception:
         pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN redirect_url TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN redirect_type INTEGER DEFAULT 301")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN is_maintenance INTEGER DEFAULT 0")
+    except Exception:
+        pass
 
     # Audit Logs Table
     cursor.execute('''

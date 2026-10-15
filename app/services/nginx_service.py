@@ -148,7 +148,109 @@ def restore_ssl_for_existing_domains() -> bool:
         pass
     return modified
 
-def create_vhost(domain: str, root_dir: str, php_version: str = "8.3", project_type: str = "php") -> Tuple[bool, str]:
+def ensure_maintenance_page(domain: str) -> Path:
+    """Creates a sleek, modern responsive maintenance page for the domain."""
+    m_dir = Path("/var/www/maintenance") / domain
+    try:
+        m_dir.mkdir(parents=True, exist_ok=True)
+        index_file = m_dir / "index.html"
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Maintenance - {domain}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: #090d16;
+            color: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 24px;
+        }}
+        .card {{
+            background: #111827;
+            border: 1px solid #1e293b;
+            border-radius: 20px;
+            padding: 50px 36px;
+            max-width: 500px;
+            text-align: center;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.6);
+        }}
+        .icon {{
+            font-size: 52px;
+            margin-bottom: 20px;
+            display: inline-block;
+            animation: bounce 2s infinite ease-in-out;
+        }}
+        @keyframes bounce {{
+            0%, 100% {{ transform: translateY(0); }}
+            50% {{ transform: translateY(-8px); }}
+        }}
+        .badge {{
+            display: inline-block;
+            padding: 6px 14px;
+            border-radius: 9999px;
+            background: rgba(245, 158, 11, 0.15);
+            border: 1px solid rgba(245, 158, 11, 0.35);
+            color: #fbbf24;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 18px;
+        }}
+        h1 {{
+            font-size: 24px;
+            font-weight: 700;
+            color: #ffffff;
+            margin-bottom: 12px;
+        }}
+        p {{
+            font-size: 14px;
+            color: #94a3b8;
+            line-height: 1.6;
+            margin-bottom: 24px;
+        }}
+        .domain-tag {{
+            font-size: 13px;
+            color: #38bdf8;
+            font-weight: 500;
+            padding: 6px 12px;
+            background: rgba(56, 189, 248, 0.1);
+            border-radius: 6px;
+            display: inline-block;
+        }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <div class="icon">🚧</div>
+        <div><span class="badge">Scheduled Maintenance</span></div>
+        <h1>We'll be right back!</h1>
+        <p>Our website is currently undergoing essential maintenance and performance upgrades. We will be back online shortly.</p>
+        <div class="domain-tag">{domain}</div>
+    </div>
+</body>
+</html>"""
+        index_file.write_text(html, encoding="utf-8")
+        return m_dir
+    except Exception:
+        return m_dir
+
+def create_vhost(
+    domain: str,
+    root_dir: str,
+    php_version: str = "8.3",
+    project_type: str = "php",
+    redirect_url: str = None,
+    redirect_type: int = 301,
+    is_maintenance: bool = False
+) -> Tuple[bool, str]:
     vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
     vhost_enabled = NGINX_ENABLED / f"{domain}.conf"
     
@@ -158,7 +260,38 @@ def create_vhost(domain: str, root_dir: str, php_version: str = "8.3", project_t
     if project_type == "laravel" and not clean_root.endswith("/public"):
         clean_root = f"{clean_root}/public"
 
-    if project_type == "static":
+    if is_maintenance:
+        m_dir = ensure_maintenance_page(domain)
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+    root {m_dir};
+    index index.html;
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    location / {{
+        try_files /index.html =503;
+    }}
+}}
+"""
+    elif redirect_url and redirect_url.strip():
+        target = redirect_url.strip()
+        code = 301 if str(redirect_type) == "301" else 302
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    return {code} {target}$request_uri;
+}}
+"""
+    elif project_type == "static":
         config = f"""server {{
     listen 80;
     listen [::]:80;

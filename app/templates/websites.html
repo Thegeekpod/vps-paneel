@@ -38,6 +38,12 @@
                                 <span style="font-size: 10px;">↗</span>
                             </a>
                             <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
+                                {% if site.is_maintenance %}
+                                <span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 11px; font-weight: 600;">🚧 Maintenance</span>
+                                {% endif %}
+                                {% if site.redirect_url %}
+                                <span class="badge" style="background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); font-size: 11px;" title="Redirects to {{ site.redirect_url }}">↗️ {{ site.redirect_type or 301 }} Redirect</span>
+                                {% endif %}
                                 {% if site.git_repo %}
                                 <a href="{{ site.git_repo }}" target="_blank" class="badge badge-gray" style="text-decoration: none; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" title="{{ site.git_repo }}">
                                     <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
@@ -85,7 +91,7 @@
                             <a href="/terminal?dir={{ site.root_dir }}" class="btn btn-secondary btn-icon" title="Open Terminal in Website Root ({{ site.root_dir }})" target="_blank">
                                 💻
                             </a>
-                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework)">
+                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }})" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
                                 ⚙️
                             </button>
                             {% if site.git_repo %}
@@ -99,6 +105,11 @@
                             <button type="button" onclick="openDeleteModal({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.db_name or '' }}')" class="btn btn-danger btn-icon" title="Delete Website">
                                 🗑️
                             </button>
+                            <!-- Maintenance Switch Toggle right after Delete Icon -->
+                            <label class="switch" title="Under Maintenance Mode (Site will show 503 maintenance page when ON)" style="margin-left: 2px;">
+                                <input type="checkbox" onchange="toggleSiteMaintenance({{ site.id }}, '{{ site.domain }}', this)" {% if site.is_maintenance %}checked{% endif %}>
+                                <span class="switch-slider"></span>
+                            </label>
                         </div>
                     </td>
                 </tr>
@@ -229,119 +240,176 @@
 
 <!-- Website Settings Modal -->
 <div id="siteSettingsModal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 520px; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-box" style="max-width: 580px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
-            <h3 style="font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+            <h3 style="font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
                 <span>⚙️</span> Website Settings: <span id="settingsModalDomain" style="color: var(--accent);"></span>
             </h3>
             <button type="button" onclick="closeModal('siteSettingsModal')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;">✕</button>
         </div>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Configure document root directory, project framework, PHP-FPM, database, or Git</p>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+            Configure web root, redirect URL, PHP version, framework presets, and Git integrations.
+        </p>
 
-        <!-- Quick SSL Manager button in Settings -->
-        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-            <div>
-                <div style="font-size: 13px; font-weight: 600; color: #34d399; display: flex; align-items: center; gap: 6px;">
-                    <span>🔒</span> SSL Certificate Manager
-                </div>
-                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
-                    Activate, reinstall, delete, or re-apply Let's Encrypt SSL.
-                </div>
-            </div>
-            <button type="button" onclick="openSslModalFromSettings()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #34d399; white-space: nowrap;">
-                Manage SSL
+        <!-- Navigation Tabs -->
+        <div class="modal-tabs">
+            <button type="button" id="btnTab_settingsTabGeneral" onclick="switchSettingsTab('settingsTabGeneral')" class="modal-tab-btn active">
+                <span>⚙️</span> General
             </button>
-        </div>
-
-        <!-- Quick Fix card for Laravel -->
-        <div id="laravelFixCard" style="display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 18px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-                <div>
-                    <div style="font-size: 13px; font-weight: 600; color: #a5b4fc; display: flex; align-items: center; gap: 6px;">
-                        <span>🛠️</span> Fix Laravel App (Permissions & Key)
-                    </div>
-                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
-                        Fixes 775 permissions on <code>storage</code> & <code>bootstrap/cache</code>, creates .env key, and clears cache.
-                    </div>
-                </div>
-                <button type="button" id="btnFixLaravel" onclick="triggerFixLaravel()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px; border-color: #6366f1; color: #a5b4fc; white-space: nowrap;">
-                    Run Fix
-                </button>
-            </div>
+            <button type="button" id="btnTab_settingsTabRedirect" onclick="switchSettingsTab('settingsTabRedirect')" class="modal-tab-btn">
+                <span>🔀</span> URL Redirect
+            </button>
+            <button type="button" id="btnTab_settingsTabGit" onclick="switchSettingsTab('settingsTabGit')" class="modal-tab-btn">
+                <span>🐙</span> Git & Database
+            </button>
+            <button type="button" id="btnTab_settingsTabTools" onclick="switchSettingsTab('settingsTabTools')" class="modal-tab-btn">
+                <span>🛠️</span> Tools & SSL
+            </button>
         </div>
 
         <form id="siteSettingsForm" method="POST" action="">
             <input type="hidden" id="settingsSiteId" value="">
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
-                <input type="text" id="settingsModalDomainInput" disabled style="opacity: 0.7; cursor: not-allowed; background: #0f172a;">
-            </div>
 
-            <!-- Project Type Setting -->
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
-                    Project Type / Framework
-                </label>
-                <select name="project_type" id="settingsProjectType" onchange="onSettingsProjectTypeChange()">
-                    <option value="laravel">🚀 Laravel Framework (Auto /public root, permissions & .env)</option>
-                    <option value="php">🐘 Standard PHP (WordPress, Custom PHP, CMS)</option>
-                    <option value="static">⚡ Static HTML / JS (No PHP)</option>
-                </select>
-                <span id="settingsProjectTypeHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
-                    Selecting <b>Laravel</b> routes web traffic to <code>.../public</code> and handles try_files rewriting.
-                </span>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
-                    Document Root Directory
-                </label>
-                <input type="text" name="root_dir" id="settingsRootDir" required placeholder="/www/wwwroot/example.com">
-                <span id="settingsRootDirHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
-                    Full path on server. For Laravel, set to base directory or <code>.../public</code>.
-                </span>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
-                <select name="php_version" id="settingsPhpVersion">
-                    <option value="8.3">PHP 8.3 FPM (Recommended)</option>
-                    <option value="8.2">PHP 8.2 FPM</option>
-                    <option value="8.4">PHP 8.4 FPM</option>
-                </select>
-            </div>
-
-            <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
-                    🗄️ Linked Database Name
-                </label>
-                <input type="text" name="db_name" id="settingsDbName" placeholder="e.g. example_db">
-                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
-                    Database name linked to this site in the VPS panel
-                </span>
-            </div>
-
-            <div style="border-top: 1px solid var(--border); margin: 18px 0 16px 0; padding-top: 16px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                    <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500; display: inline-flex; align-items: center; gap: 6px;">
-                        <span>🐙</span> GitHub Repository
-                    </label>
-                    <span class="badge badge-gray" style="font-size: 10px; font-weight: 500;">Optional</span>
+            <!-- TAB 1: General Settings -->
+            <div id="settingsTabGeneral" class="tab-pane active">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
+                    <input type="text" id="settingsModalDomainInput" disabled style="opacity: 0.7; cursor: not-allowed; background: #0f172a;">
                 </div>
-                <input type="text" name="git_repo" id="settingsGitRepo" placeholder="https://github.com/username/repository.git">
+
+                <!-- Project Type Setting -->
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                        Project Type / Framework
+                    </label>
+                    <select name="project_type" id="settingsProjectType" onchange="onSettingsProjectTypeChange()">
+                        <option value="laravel">🚀 Laravel Framework (Auto /public root, permissions & .env)</option>
+                        <option value="php">🐘 Standard PHP (WordPress, Custom PHP, CMS)</option>
+                        <option value="static">⚡ Static HTML / JS (No PHP)</option>
+                    </select>
+                    <span id="settingsProjectTypeHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                        Selecting <b>Laravel</b> routes web traffic to <code>.../public</code> and handles try_files rewriting.
+                    </span>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                        Document Root Directory
+                    </label>
+                    <input type="text" name="root_dir" id="settingsRootDir" required placeholder="/www/wwwroot/example.com">
+                    <span id="settingsRootDirHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                        Full path on server. For Laravel, set to base directory or <code>.../public</code>.
+                    </span>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
+                    <select name="php_version" id="settingsPhpVersion">
+                        <option value="8.3">PHP 8.3 FPM (Recommended)</option>
+                        <option value="8.2">PHP 8.2 FPM</option>
+                        <option value="8.4">PHP 8.4 FPM</option>
+                    </select>
+                </div>
             </div>
 
-            <div style="margin-bottom: 24px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-                    <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">
+            <!-- TAB 2: Redirect URL -->
+            <div id="settingsTabRedirect" class="tab-pane">
+                <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+                    <div style="font-size: 13px; font-weight: 600; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+                        <span>🔀</span> Website URL Redirection
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                        Forward all traffic arriving at this domain to another target URL (e.g. <code>https://another-site.com</code>). Leave blank to disable redirection.
+                    </div>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                        Target Redirect URL
+                    </label>
+                    <input type="url" name="redirect_url" id="settingsRedirectUrl" placeholder="https://new-domain.com">
+                    <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                        Include <code>http://</code> or <code>https://</code>. Empty field will disable redirection.
+                    </span>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                        Redirect HTTP Status Code
+                    </label>
+                    <select name="redirect_type" id="settingsRedirectType">
+                        <option value="301" selected>301 - Permanent Redirect (Recommended for SEO & permanent domain moves)</option>
+                        <option value="302">302 - Temporary Redirect (For maintenance, testing, or temporary promos)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- TAB 3: Git & Database -->
+            <div id="settingsTabGit" class="tab-pane">
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                        🗄️ Linked Database Name
+                    </label>
+                    <input type="text" name="db_name" id="settingsDbName" placeholder="e.g. example_db">
+                    <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                        Database name linked to this site in the VPS panel
+                    </span>
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                        <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500; display: inline-flex; align-items: center; gap: 6px;">
+                            <span>🐙</span> GitHub Repository
+                        </label>
+                        <span class="badge badge-gray" style="font-size: 10px; font-weight: 500;">Optional</span>
+                    </div>
+                    <input type="text" name="git_repo" id="settingsGitRepo" placeholder="https://github.com/username/repository.git">
+                </div>
+
+                <div style="margin-bottom: 16px;">
+                    <label style="display: block; font-size: 13px; color: var(--text-secondary); font-weight: 500; margin-bottom: 6px;">
                         Git Branch
                     </label>
-                    <span class="badge badge-gray" style="font-size: 10px; font-weight: 500;">Optional</span>
+                    <input type="text" name="git_branch" id="settingsGitBranch" placeholder="main">
                 </div>
-                <input type="text" name="git_branch" id="settingsGitBranch" placeholder="main">
             </div>
 
-            <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <!-- TAB 4: Tools & SSL -->
+            <div id="settingsTabTools" class="tab-pane">
+                <!-- SSL Quick Link -->
+                <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                    <div>
+                        <div style="font-size: 13px; font-weight: 600; color: #34d399; display: flex; align-items: center; gap: 6px;">
+                            <span>🔒</span> SSL Certificate Manager
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                            Issue, reinstall, force renewal, or delete SSL certificates.
+                        </div>
+                    </div>
+                    <button type="button" onclick="openSslModalFromSettings()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #34d399; white-space: nowrap;">
+                        Open SSL Manager
+                    </button>
+                </div>
+
+                <!-- Quick Fix card for Laravel -->
+                <div id="laravelFixCard" style="background: rgba(99, 102, 241, 0.08); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                        <div>
+                            <div style="font-size: 13px; font-weight: 600; color: #a5b4fc; display: flex; align-items: center; gap: 6px;">
+                                <span>🛠️</span> Fix Laravel App (Permissions & Key)
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                                Fixes 775 permissions on <code>storage</code> & <code>bootstrap/cache</code>, creates .env key, and clears cache.
+                            </div>
+                        </div>
+                        <button type="button" id="btnFixLaravel" onclick="triggerFixLaravel()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px; border-color: #6366f1; color: #a5b4fc; white-space: nowrap;">
+                            Run Fix
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid var(--border); padding-top: 16px;">
                 <button type="button" onclick="closeModal('siteSettingsModal')" class="btn btn-secondary">Cancel</button>
                 <button type="submit" class="btn btn-primary">Save Settings</button>
             </div>
@@ -614,7 +682,16 @@ async function triggerFixLaravel() {
     }
 }
 
-function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType) {
+function switchSettingsTab(tabId) {
+    document.querySelectorAll(".modal-tab-btn").forEach(btn => btn.classList.remove("active"));
+    document.querySelectorAll("#siteSettingsModal .tab-pane").forEach(pane => pane.classList.remove("active"));
+    const btn = document.getElementById("btnTab_" + tabId);
+    const pane = document.getElementById(tabId);
+    if (btn) btn.classList.add("active");
+    if (pane) pane.classList.add("active");
+}
+
+function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType) {
     currentSiteSettingsId = id;
     document.getElementById("settingsSiteId").value = id;
     document.getElementById("settingsModalDomain").innerText = domain;
@@ -624,6 +701,8 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
     document.getElementById("settingsGitRepo").value = gitRepo || "";
     document.getElementById("settingsGitBranch").value = gitBranch || "";
     document.getElementById("settingsDbName").value = dbName || "";
+    document.getElementById("settingsRedirectUrl").value = redirectUrl || "";
+    document.getElementById("settingsRedirectType").value = redirectType || 301;
     
     const projSelect = document.getElementById("settingsProjectType");
     if (projSelect) {
@@ -631,8 +710,33 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
     }
     onSettingsProjectTypeChange();
 
+    // Default to the first tab (General)
+    switchSettingsTab('settingsTabGeneral');
+
     document.getElementById("siteSettingsForm").action = `/websites/${id}/settings`;
     openModal("siteSettingsModal");
+}
+
+async function toggleSiteMaintenance(siteId, domain, checkbox) {
+    const originalState = !checkbox.checked;
+    checkbox.disabled = true;
+    showToast(`Updating maintenance mode for ${domain}...`, 'success');
+    try {
+        const res = await fetch(`/websites/${siteId}/toggle-maintenance`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showToast(data.error || 'Failed to toggle maintenance mode', 'danger');
+            checkbox.checked = originalState;
+        }
+    } catch (e) {
+        showToast(`Request failed: ${e}`, 'danger');
+        checkbox.checked = originalState;
+    } finally {
+        checkbox.disabled = false;
+    }
 }
 
 function openDeleteModal(id, domain, rootDir, dbName) {
