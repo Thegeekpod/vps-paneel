@@ -140,6 +140,11 @@ def setup_laravel_environment(
 
     return True, "; ".join(msgs) if msgs else "Laravel setup complete"
 
+def get_client_ip(request: Request) -> str:
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
+
 @router.post("/create")
 async def create_website_action(
     request: Request,
@@ -155,52 +160,54 @@ async def create_website_action(
     db_pass: Optional[str] = Form(None),
     user: dict = Depends(login_required)
 ):
-    domain = domain.strip().lower()
-    project_type = project_type.strip().lower() if project_type else "php"
-    if project_type not in ["laravel", "php", "static"]:
-        project_type = "php"
+    client_ip = get_client_ip(request)
+    try:
+        domain = domain.strip().lower()
+        project_type = project_type.strip().lower() if project_type else "php"
+        if project_type not in ["laravel", "php", "static"]:
+            project_type = "php"
 
-    if not domain or " " in domain:
-        return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Invalid domain name provided')}", status_code=303)
+        if not domain or " " in domain:
+            return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Invalid domain name provided')}", status_code=303)
 
-    if root_dir and root_dir.strip():
-        site_root = Path(root_dir.strip())
-    else:
-        site_root = WEB_ROOT / domain
-    site_root.mkdir(parents=True, exist_ok=True)
-    
-    clean_git_repo = git_repo.strip() if git_repo else ""
-    clean_git_branch = git_branch.strip() if git_branch else ""
+        if root_dir and root_dir.strip():
+            site_root = Path(root_dir.strip())
+        else:
+            site_root = WEB_ROOT / domain
+        site_root.mkdir(parents=True, exist_ok=True)
+        
+        clean_git_repo = git_repo.strip() if git_repo else ""
+        clean_git_branch = git_branch.strip() if git_branch else ""
 
-    if clean_git_repo:
-        # If directory has leftover files from a previously deleted site, wipe it clean for fresh clone
-        if site_root.exists() and any(site_root.iterdir()):
-            try:
-                shutil.rmtree(str(site_root), ignore_errors=True)
-                subprocess.run(["rm", "-rf", str(site_root)], check=False, timeout=15)
-                site_root.mkdir(parents=True, exist_ok=True)
-            except Exception:
-                pass
+        if clean_git_repo:
+            # If directory has leftover files from a previously deleted site, wipe it clean for fresh clone
+            if site_root.exists() and any(site_root.iterdir()):
+                try:
+                    shutil.rmtree(str(site_root), ignore_errors=True)
+                    subprocess.run(["rm", "-rf", str(site_root)], check=False, timeout=15)
+                    site_root.mkdir(parents=True, exist_ok=True)
+                except Exception:
+                    pass
 
-        # Clone repository into document root
-        cloned, clone_msg = clone_repository(clean_git_repo, site_root, clean_git_branch)
-        if not cloned:
-            # If directory is empty, remove it to keep filesystem clean
-            try:
-                if not any(site_root.iterdir()):
-                    site_root.rmdir()
-            except Exception:
-                pass
-            log_action(user["username"], "CreateWebsiteFailed", f"Domain: {domain}, Git error: {clone_msg}", request.client.host)
-            return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Git clone failed: {clone_msg}')}", status_code=303)
-    else:
-        if project_type == "laravel":
-            # For Laravel, create public directory and welcoming index.php
-            public_dir = site_root / "public"
-            public_dir.mkdir(parents=True, exist_ok=True)
-            index_file = public_dir / "index.php"
-            if not index_file.exists():
-                index_file.write_text(f"""<!DOCTYPE html>
+            # Clone repository into document root
+            cloned, clone_msg = clone_repository(clean_git_repo, site_root, clean_git_branch, clean_target=True)
+            if not cloned:
+                # If directory is empty, remove it to keep filesystem clean
+                try:
+                    if not any(site_root.iterdir()):
+                        site_root.rmdir()
+                except Exception:
+                    pass
+                log_action(user["username"], "CreateWebsiteFailed", f"Domain: {domain}, Git error: {clone_msg}", client_ip)
+                return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Git clone failed: {clone_msg}')}", status_code=303)
+        else:
+            if project_type == "laravel":
+                # For Laravel, create public directory and welcoming index.php
+                public_dir = site_root / "public"
+                public_dir.mkdir(parents=True, exist_ok=True)
+                index_file = public_dir / "index.php"
+                if not index_file.exists():
+                    index_file.write_text(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -220,11 +227,11 @@ async def create_website_action(
 </body>
 </html>
 """)
-        else:
-            # Create default index.html if empty
-            index_file = site_root / "index.html"
-            if not index_file.exists():
-                index_file.write_text(f"""<!DOCTYPE html>
+            else:
+                # Create default index.html if empty
+                index_file = site_root / "index.html"
+                if not index_file.exists():
+                    index_file.write_text(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -244,96 +251,101 @@ async def create_website_action(
 </html>
 """)
 
-    # Permissions: ensure web server (www-data or www) can read
-    try:
-        shutil.chown(str(site_root), user="www-data", group="www-data")
-        for p in site_root.glob("**/*"):
-            try:
-                shutil.chown(str(p), user="www-data", group="www-data")
-            except Exception:
-                pass
-    except Exception:
-        pass
+        # Permissions: ensure web server (www-data or www) can read
+        try:
+            shutil.chown(str(site_root), user="www-data", group="www-data")
+            for p in site_root.glob("**/*"):
+                try:
+                    shutil.chown(str(p), user="www-data", group="www-data")
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
-    # Optional Database Creation
-    linked_db_name = None
-    clean_user = None
-    clean_pass = None
-    db_info_msg = ""
-    should_create_db = create_db in ["1", "true", "on", True]
+        # Optional Database Creation
+        linked_db_name = None
+        clean_user = None
+        clean_pass = None
+        db_info_msg = ""
+        should_create_db = create_db in ["1", "true", "on", True]
 
-    if should_create_db:
-        # Generate safe database name
-        if db_name and db_name.strip():
-            raw_db = db_name.strip()
-        else:
-            raw_db = domain.replace(".", "_").replace("-", "_")
-        clean_db = re.sub(r'[^a-zA-Z0-9_]', '_', raw_db)[:16].strip('_')
-        if not clean_db:
-            clean_db = "site_db"
-            
-        # User
-        if db_user and db_user.strip():
-            clean_user = re.sub(r'[^a-zA-Z0-9_]', '_', db_user.strip())[:16].strip('_')
-        else:
-            clean_user = clean_db[:16]
-            
-        # Password
-        if db_pass and db_pass.strip():
-            clean_pass = db_pass.strip()
-        else:
-            clean_pass = secrets.token_urlsafe(12)
+        if should_create_db:
+            # Generate safe database name
+            if db_name and db_name.strip():
+                raw_db = db_name.strip()
+            else:
+                raw_db = domain.replace(".", "_").replace("-", "_")
+            clean_db = re.sub(r'[^a-zA-Z0-9_]', '_', raw_db)[:16].strip('_')
+            if not clean_db:
+                clean_db = "site_db"
+                
+            # User
+            if db_user and db_user.strip():
+                clean_user = re.sub(r'[^a-zA-Z0-9_]', '_', db_user.strip())[:16].strip('_')
+            else:
+                clean_user = clean_db[:16]
+                
+            # Password
+            if db_pass and db_pass.strip():
+                clean_pass = db_pass.strip()
+            else:
+                clean_pass = secrets.token_urlsafe(12)
 
-        db_success, db_err = create_db_and_user(clean_db, clean_user, clean_pass, db_host="127.0.0.1", charset="utf8mb4")
-        if db_success:
-            linked_db_name = clean_db
-            conn = get_db()
-            cur = conn.cursor()
-            try:
-                cur.execute(
-                    "INSERT INTO databases (db_name, db_user, db_pass, db_host, charset, note) VALUES (?, ?, ?, ?, ?, ?)",
-                    (clean_db, clean_user, clean_pass, "127.0.0.1", "utf8mb4", f"Created with website: {domain}")
-                )
-                conn.commit()
-            except Exception:
-                pass
+            db_success, db_err = create_db_and_user(clean_db, clean_user, clean_pass, db_host="127.0.0.1", charset="utf8mb4")
+            if db_success:
+                linked_db_name = clean_db
+                conn = get_db()
+                cur = conn.cursor()
+                try:
+                    cur.execute(
+                        "INSERT INTO databases (db_name, db_user, db_pass, db_host, charset, note) VALUES (?, ?, ?, ?, ?, ?)",
+                        (clean_db, clean_user, clean_pass, "127.0.0.1", "utf8mb4", f"Created with website: {domain}")
+                    )
+                    conn.commit()
+                except Exception:
+                    pass
+                conn.close()
+                db_info_msg = f" (Database: {clean_db} created)"
+                log_action(user["username"], "CreateDatabaseForSite", f"Domain: {domain}, DB: {clean_db}, User: {clean_user}", client_ip)
+            else:
+                log_action(user["username"], "CreateDatabaseFailed", f"Domain: {domain}, Error: {db_err}", client_ip)
+
+        # If Laravel, execute Laravel bootstrapping (permissions, .env, artisan)
+        if project_type == "laravel":
+            setup_laravel_environment(site_root, db_name=linked_db_name, db_user=clean_user, db_pass=clean_pass, php_version=php_version)
+
+        # Create Nginx VirtualHost
+        vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version, project_type)
+
+        conn = get_db()
+        cursor = conn.cursor()
+        try:
+            cursor.execute(
+                "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type)
+            )
+            conn.commit()
+        except Exception as e:
             conn.close()
-            db_info_msg = f" (Database: {clean_db} created)"
-            log_action(user["username"], "CreateDatabaseForSite", f"Domain: {domain}, DB: {clean_db}, User: {clean_user}", request.client.host)
-        else:
-            log_action(user["username"], "CreateDatabaseFailed", f"Domain: {domain}, Error: {db_err}", request.client.host)
-
-    # If Laravel, execute Laravel bootstrapping (permissions, .env, artisan)
-    if project_type == "laravel":
-        setup_laravel_environment(site_root, clean_db=linked_db_name, clean_user=clean_user, clean_pass=clean_pass, php_version=php_version)
-
-    # Create Nginx VirtualHost
-    vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version, project_type)
-
-    conn = get_db()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-            (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type)
-        )
-        conn.commit()
-    except Exception as e:
+            return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Website already exists or DB error: {e}')}", status_code=303)
         conn.close()
-        return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Website already exists or DB error: {e}')}", status_code=303)
-    conn.close()
 
-    action_details = f"Domain: {domain}, Type: {project_type}, Status: {'OK' if vhost_success else vhost_msg}"
-    if clean_git_repo:
-        action_details += f", Git: {clean_git_repo}"
-    if linked_db_name:
-        action_details += f", DB: {linked_db_name}"
-    log_action(user["username"], "CreateWebsite", action_details, request.client.host)
-    
-    success_msg = f"Website {domain} ({project_type.capitalize()}) created successfully!{db_info_msg}"
-    if clean_git_repo:
-        success_msg += " (Repository cloned)"
-    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(success_msg)}", status_code=303)
+        action_details = f"Domain: {domain}, Type: {project_type}, Status: {'OK' if vhost_success else vhost_msg}"
+        if clean_git_repo:
+            action_details += f", Git: {clean_git_repo}"
+        if linked_db_name:
+            action_details += f", DB: {linked_db_name}"
+        log_action(user["username"], "CreateWebsite", action_details, client_ip)
+        
+        success_msg = f"Website {domain} ({project_type.capitalize()}) created successfully!{db_info_msg}"
+        if clean_git_repo:
+            success_msg += " (Repository cloned)"
+        return RedirectResponse(url=f"/websites?success={urllib.parse.quote(success_msg)}", status_code=303)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        log_action(user["username"], "CreateWebsiteError", f"Domain: {domain if 'domain' in locals() else 'unknown'}, Error: {str(e)}", client_ip)
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Failed to create website: {e}')}", status_code=303)
 
 @router.post("/{site_id}/delete")
 async def delete_website_action(
@@ -424,7 +436,7 @@ async def delete_website_action(
         deleted_info.append(f"database {linked_db} removed")
 
     info_str = f" ({', '.join(deleted_info)})" if deleted_info else ""
-    log_action(user["username"], "DeleteWebsite", f"Deleted {domain}{info_str}", request.client.host)
+    log_action(user["username"], "DeleteWebsite", f"Deleted {domain}{info_str}", get_client_ip(request))
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Website {domain} deleted successfully{info_str}')}", status_code=303)
 
 @router.post("/{site_id}/ssl")
@@ -446,7 +458,7 @@ async def issue_ssl_action(site_id: int, request: Request, user: dict = Depends(
         conn.commit()
     conn.close()
 
-    log_action(user["username"], "IssueSSL", f"Domain: {domain}, Result: {msg}", request.client.host)
+    log_action(user["username"], "IssueSSL", f"Domain: {domain}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": success, "message": msg})
 
 @router.post("/{site_id}/sync")
@@ -464,7 +476,7 @@ async def sync_vhost_action(site_id: int, request: Request, user: dict = Depends
     success, msg = create_vhost(site["domain"], site["root_dir"], site["php_version"], project_type)
     conn.close()
 
-    log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Preset: {project_type}, Result: {msg}", request.client.host)
+    log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Preset: {project_type}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": success, "message": msg})
 
 @router.post("/{site_id}/git-pull")
@@ -498,7 +510,7 @@ async def pull_website_git(site_id: int, request: Request, user: dict = Depends(
         except Exception:
             pass
 
-    log_action(user["username"], "GitPull", f"Domain: {site['domain']}, Result: {msg}", request.client.host)
+    log_action(user["username"], "GitPull", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": success, "message": msg})
 
 @router.post("/{site_id}/settings")
@@ -569,7 +581,7 @@ async def update_website_settings(
     conn.commit()
     conn.close()
 
-    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, PHP: {php_version}", request.client.host)
+    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, PHP: {php_version}", get_client_ip(request))
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain} ({project_type.capitalize()})')}", status_code=303)
 
 @router.post("/{site_id}/fix-laravel")
@@ -615,7 +627,7 @@ async def fix_laravel_action(site_id: int, request: Request, user: dict = Depend
     conn.commit()
     conn.close()
 
-    log_action(user["username"], "FixLaravel", f"Domain: {domain}, Nginx: {vhost_msg}, Setup: {setup_msg}", request.client.host)
+    log_action(user["username"], "FixLaravel", f"Domain: {domain}, Nginx: {vhost_msg}, Setup: {setup_msg}", get_client_ip(request))
     return JSONResponse({
         "success": True,
         "message": f"Laravel configured! {setup_msg}. Nginx: {vhost_msg}"

@@ -14,7 +14,7 @@ def sanitize_repo_url(url: str) -> str:
         url = "https://" + url
     return url
 
-def clone_repository(repo_url: str, target_dir: Union[Path, str], branch: str = "") -> Tuple[bool, str]:
+def clone_repository(repo_url: str, target_dir: Union[Path, str], branch: str = "", clean_target: bool = True) -> Tuple[bool, str]:
     target_path = Path(target_dir)
     clean_url = sanitize_repo_url(repo_url)
     
@@ -26,12 +26,23 @@ def clone_repository(repo_url: str, target_dir: Union[Path, str], branch: str = 
 
     # Check if target directory is empty (git clone fails if target is non-empty)
     if any(target_path.iterdir()):
-        # Remove empty or default placeholder index.html if present
-        placeholder = target_path / "index.html"
-        if placeholder.exists() and len(list(target_path.iterdir())) == 1:
-            placeholder.unlink()
+        if clean_target:
+            # Clean leftover files or default placeholders so clone succeeds
+            for item in target_path.iterdir():
+                try:
+                    if item.is_dir():
+                        shutil.rmtree(item, ignore_errors=True)
+                    else:
+                        item.unlink(missing_ok=True)
+                except Exception:
+                    pass
         else:
-            return False, f"Target directory {target_path} is not empty"
+            # Remove empty or default placeholder index.html if present
+            placeholder = target_path / "index.html"
+            if placeholder.exists() and len(list(target_path.iterdir())) == 1:
+                placeholder.unlink()
+            else:
+                return False, f"Target directory {target_path} is not empty"
 
     cmd = ["git", "clone", "--depth", "1"]
     if branch and branch.strip():
