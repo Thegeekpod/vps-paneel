@@ -15,10 +15,12 @@ from app.templates_util import render
 router = APIRouter(prefix="/file-manager")
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".ico", ".bmp"}
-TEXT_EXTS = {
-    ".html", ".htm", ".php", ".phtml", ".js", ".mjs", ".ts", ".css", ".scss", ".sass",
-    ".json", ".xml", ".yaml", ".yml", ".md", ".txt", ".conf", ".ini", ".env", ".htaccess",
-    ".sql", ".py", ".sh", ".bash", ".log", ".gitignore", ".env.example"
+BINARY_EXTS = {
+    ".zip", ".tar", ".gz", ".tgz", ".bz2", ".7z", ".rar", ".iso",
+    ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".ico", ".tiff",
+    ".mp3", ".wav", ".ogg", ".flac", ".mp4", ".mkv", ".avi", ".mov", ".webm",
+    ".pdf", ".exe", ".bin", ".dll", ".so", ".dylib", ".o", ".a",
+    ".woff", ".woff2", ".ttf", ".eot", ".otf"
 }
 ARCHIVE_EXTS = {".zip"}
 
@@ -54,6 +56,9 @@ def get_file_metadata(entry: os.DirEntry, base_rel: str) -> dict:
         # Permissions octal
         perms = oct(stat.st_mode)[-4:]
 
+        # Any regular file that is not a binary image, archive, or compiled binary is fully editable
+        is_editable = (not is_dir) and (ext not in BINARY_EXTS)
+
         return {
             "name": name,
             "rel_path": rel_path,
@@ -63,7 +68,7 @@ def get_file_metadata(entry: os.DirEntry, base_rel: str) -> dict:
             "permissions": perms,
             "modified": mtime_str,
             "ext": ext.lstrip("."),
-            "is_editable": (ext in TEXT_EXTS) or is_dir is False and ext == "",
+            "is_editable": is_editable,
             "is_archive": ext in ARCHIVE_EXTS,
             "is_image": ext in IMAGE_EXTS
         }

@@ -10,9 +10,17 @@
 <style>
     #aceEditorContainer {
         width: 100%;
-        height: 540px;
+        height: 560px;
+        font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace !important;
         font-size: 14px;
-        line-height: 1.6;
+        letter-spacing: 0px !important;
+    }
+    .ace_editor, .ace_editor * {
+        font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace !important;
+        letter-spacing: 0px !important;
+    }
+    .ace_editor .ace_text-layer {
+        letter-spacing: 0px !important;
     }
     .breadcrumb-item {
         color: var(--accent);
@@ -268,16 +276,14 @@
                                     <span class="fm-icon fm-icon-txt">📄</span>
                                 {% endif %}
 
-                                {% if item.is_editable %}
-                                <a href="javascript:void(0)" onclick="editFile('{{ item.rel_path }}', '{{ item.name }}', '{{ item.ext }}')" style="color: #f8fafc; text-decoration: none; font-weight: 500;">
-                                    {{ item.name }}
-                                </a>
-                                {% elif item.is_image %}
+                                {% if item.is_image %}
                                 <a href="javascript:void(0)" onclick="previewImage('{{ item.rel_path }}', '{{ item.name }}')" style="color: #34d399; text-decoration: none; font-weight: 500;">
                                     {{ item.name }}
                                 </a>
                                 {% else %}
-                                <span style="color: #f8fafc; font-weight: 500;">{{ item.name }}</span>
+                                <a href="javascript:void(0)" onclick="editFile('{{ item.rel_path }}', '{{ item.name }}', '{{ item.ext }}')" style="color: #f8fafc; text-decoration: none; font-weight: 500;">
+                                    {{ item.name }}
+                                </a>
                                 {% endif %}
                             </span>
                         {% endif %}
@@ -291,7 +297,7 @@
                     <td style="color: var(--text-muted); font-size: 12px;">{{ item.modified }}</td>
                     <td style="text-align: right;">
                         <div style="display: inline-flex; gap: 4px;">
-                            {% if item.is_editable %}
+                            {% if not item.is_dir and not item.is_image %}
                             <button onclick="editFile('{{ item.rel_path }}', '{{ item.name }}', '{{ item.ext }}')" class="btn btn-primary" style="padding: 4px 8px; font-size: 11px;" title="Edit Code">
                                 ✏️
                             </button>
@@ -483,6 +489,7 @@
             aceEditor.setTheme("ace/theme/tomorrow_night_eighties");
             aceEditor.session.setMode("ace/mode/php");
             aceEditor.setOptions({
+                fontFamily: "'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
                 fontSize: "14px",
                 showPrintMargin: false,
                 highlightActiveLine: true,
@@ -568,11 +575,12 @@
             editingFilePath = path;
             document.getElementById("editorFileName").innerText = filename;
             
-            // Set Ace Mode based on extension
+            // Set Ace Mode based on filename and extension
+            const lowerName = filename.toLowerCase();
             const modeMap = {
                 "php": "php", "phtml": "php",
                 "html": "html", "htm": "html",
-                "js": "javascript", "ts": "typescript",
+                "js": "javascript", "ts": "typescript", "mjs": "javascript",
                 "css": "css", "scss": "scss",
                 "json": "json",
                 "py": "python",
@@ -580,14 +588,35 @@
                 "sh": "sh", "bash": "sh",
                 "md": "markdown",
                 "xml": "xml",
-                "yml": "yaml", "yaml": "yaml"
+                "yml": "yaml", "yaml": "yaml",
+                "ini": "ini", "conf": "sh",
+                "env": "sh", "example": "sh"
             };
-            const mode = modeMap[ext] || "text";
+
+            let mode = "text";
+            if (lowerName.startsWith(".env") || lowerName.includes(".env") || ext === "example") {
+                mode = "sh";
+            } else if (lowerName === "dockerfile" || lowerName.startsWith("dockerfile.")) {
+                mode = "dockerfile";
+            } else if (lowerName === "makefile") {
+                mode = "makefile";
+            } else if (modeMap[ext]) {
+                mode = modeMap[ext];
+            }
+
             aceEditor.session.setMode(`ace/mode/${mode}`);
             document.getElementById("editorModeBadge").innerText = mode.toUpperCase();
 
             aceEditor.setValue(data.content, -1);
             document.getElementById("editorContainer").style.display = "block";
+            
+            // Force Ace to re-measure character dimensions when becoming visible
+            aceEditor.resize(true);
+            setTimeout(() => {
+                aceEditor.resize(true);
+                aceEditor.renderer.updateFull();
+            }, 60);
+
             document.getElementById("editorContainer").scrollIntoView({ behavior: "smooth" });
             aceEditor.focus();
         } catch (e) {
