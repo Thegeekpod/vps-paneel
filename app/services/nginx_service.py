@@ -64,18 +64,83 @@ def ensure_default_catchall():
     except Exception:
         pass
 
-def create_vhost(domain: str, root_dir: str, php_version: str = "8.3") -> Tuple[bool, str]:
+def create_vhost(domain: str, root_dir: str, php_version: str = "8.3", project_type: str = "php") -> Tuple[bool, str]:
     vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
     vhost_enabled = NGINX_ENABLED / f"{domain}.conf"
     
     # PHP-FPM socket path
     fpm_socket = f"/run/php/php{php_version}-fpm.sock"
-    
-    config = f"""server {{
+    clean_root = root_dir.rstrip("/")
+    if project_type == "laravel" and not clean_root.endswith("/public"):
+        clean_root = f"{clean_root}/public"
+
+    if project_type == "static":
+        config = f"""server {{
     listen 80;
     listen [::]:80;
     server_name {domain} www.{domain};
-    root {root_dir};
+    root {clean_root};
+    index index.html index.htm;
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+
+    location / {{
+        try_files $uri $uri/ /index.html =404;
+    }}
+
+    location ~ /\\.ht {{
+        deny all;
+    }}
+}}
+"""
+    elif project_type == "laravel":
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+    root {clean_root};
+    index index.php index.html index.htm;
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    charset utf-8;
+
+    location / {{
+        try_files $uri $uri/ /index.php?$query_string;
+    }}
+
+    location = /favicon.ico {{ access_log off; log_not_found off; }}
+    location = /robots.txt  {{ access_log off; log_not_found off; }}
+
+    error_page 404 /index.php;
+
+    location ~ \\.php$ {{
+        include snippets/fastcgi-php.conf;
+        fastcgi_pass unix:{fpm_socket};
+        fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;
+        include fastcgi_params;
+    }}
+
+    location ~ /\\.(?!well-known).* {{
+        deny all;
+    }}
+}}
+"""
+    else:  # Standard PHP
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+    root {clean_root};
     index index.html index.htm index.php;
 
     access_log /var/log/nginx/{domain}-access.log;

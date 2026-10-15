@@ -49,6 +49,13 @@
                                     <span>🗄️</span> {{ site.db_name }}
                                 </a>
                                 {% endif %}
+                                {% if site.project_type == 'laravel' %}
+                                <span class="badge" style="background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); font-size: 11px;">🚀 Laravel</span>
+                                {% elif site.project_type == 'static' %}
+                                <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 11px;">⚡ Static</span>
+                                {% else %}
+                                <span class="badge badge-gray" style="font-size: 11px;">🐘 PHP</span>
+                                {% endif %}
                             </div>
                         </div>
                     </td>
@@ -78,7 +85,7 @@
                             <a href="/terminal?dir={{ site.root_dir }}" class="btn btn-secondary btn-icon" title="Open Terminal in Website Root ({{ site.root_dir }})" target="_blank">
                                 💻
                             </a>
-                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB)">
+                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework)">
                                 ⚙️
                             </button>
                             {% if site.git_repo %}
@@ -116,8 +123,23 @@
         <form id="addWebsiteForm" method="POST" action="/websites/create">
             <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
-                <input type="text" name="domain" placeholder="example.com" required>
+                <input type="text" name="domain" id="addSiteDomain" placeholder="example.com" required>
                 <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Point your DNS A-record to this server IP first</span>
+            </div>
+
+            <!-- Project Type Selection -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 600;">
+                    Project Type / Framework
+                </label>
+                <select name="project_type" id="addProjectType" onchange="onAddProjectTypeChange()">
+                    <option value="laravel" selected>🚀 Laravel Framework (Auto /public root, permissions & .env)</option>
+                    <option value="php">🐘 Standard PHP (WordPress, Custom PHP, CMS)</option>
+                    <option value="static">⚡ Static HTML / JS (React, Vue dist, Plain HTML)</option>
+                </select>
+                <span id="addProjectTypeHelp" style="font-size: 11px; color: #38bdf8; margin-top: 4px; display: block;">
+                    ✨ Auto-routes Nginx document root to <code>.../public</code>, sets 775 storage permissions, and configures .env.
+                </span>
             </div>
 
             <!-- Optional Custom Root Directory -->
@@ -126,15 +148,15 @@
                     <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">Document Root Directory</label>
                     <span class="badge badge-gray" style="font-size: 10px; font-weight: 500;">Optional</span>
                 </div>
-                <input type="text" name="root_dir" placeholder="Auto-generated (e.g. /www/wwwroot/example.com)">
-                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
-                    Leave empty for default path, or set custom root (e.g. <code>/www/wwwroot/domain/public</code> for Laravel)
+                <input type="text" name="root_dir" id="addRootDirInput" placeholder="Auto-generated (e.g. /www/wwwroot/example.com)">
+                <span id="addRootDirHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                    Leave empty for default path. For Laravel, Nginx will automatically serve the <code>/public</code> subfolder.
                 </span>
             </div>
 
             <div style="margin-bottom: 18px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
-                <select name="php_version">
+                <select name="php_version" id="addPhpVersion">
                     <option value="8.3" selected>PHP 8.3 FPM (Recommended)</option>
                     <option value="8.2">PHP 8.2 FPM</option>
                     <option value="8.4">PHP 8.4 FPM</option>
@@ -214,21 +236,54 @@
             </h3>
             <button type="button" onclick="closeModal('siteSettingsModal')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;">✕</button>
         </div>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Configure document root directory, PHP-FPM version, associated database, or Git repository</p>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Configure document root directory, project framework, PHP-FPM, database, or Git</p>
+
+        <!-- Quick Fix card for Laravel -->
+        <div id="laravelFixCard" style="display: none; background: rgba(99, 102, 241, 0.1); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; padding: 14px; margin-bottom: 18px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
+                <div>
+                    <div style="font-size: 13px; font-weight: 600; color: #a5b4fc; display: flex; align-items: center; gap: 6px;">
+                        <span>🛠️</span> Fix Laravel App (Permissions & Key)
+                    </div>
+                    <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+                        Fixes 775 permissions on <code>storage</code> & <code>bootstrap/cache</code>, creates .env key, and clears cache.
+                    </div>
+                </div>
+                <button type="button" id="btnFixLaravel" onclick="triggerFixLaravel()" class="btn btn-secondary" style="font-size: 12px; padding: 6px 12px; border-color: #6366f1; color: #a5b4fc; white-space: nowrap;">
+                    Run Fix
+                </button>
+            </div>
+        </div>
 
         <form id="siteSettingsForm" method="POST" action="">
+            <input type="hidden" id="settingsSiteId" value="">
             <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
                 <input type="text" id="settingsModalDomainInput" disabled style="opacity: 0.7; cursor: not-allowed; background: #0f172a;">
+            </div>
+
+            <!-- Project Type Setting -->
+            <div style="margin-bottom: 16px;">
+                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
+                    Project Type / Framework
+                </label>
+                <select name="project_type" id="settingsProjectType" onchange="onSettingsProjectTypeChange()">
+                    <option value="laravel">🚀 Laravel Framework (Auto /public root, permissions & .env)</option>
+                    <option value="php">🐘 Standard PHP (WordPress, Custom PHP, CMS)</option>
+                    <option value="static">⚡ Static HTML / JS (No PHP)</option>
+                </select>
+                <span id="settingsProjectTypeHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                    Selecting <b>Laravel</b> routes web traffic to <code>.../public</code> and handles try_files rewriting.
+                </span>
             </div>
 
             <div style="margin-bottom: 16px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
                     Document Root Directory
                 </label>
-                <input type="text" name="root_dir" id="settingsRootDir" required placeholder="/www/wwwroot/example.com or /www/wwwroot/example.com/public">
-                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
-                    Full path on server. For frameworks like Laravel or Symfony, set to <code>.../public</code>.
+                <input type="text" name="root_dir" id="settingsRootDir" required placeholder="/www/wwwroot/example.com">
+                <span id="settingsRootDirHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
+                    Full path on server. For Laravel, set to base directory or <code>.../public</code>.
                 </span>
             </div>
 
@@ -380,7 +435,85 @@ if (form) {
     });
 }
 
-function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName) {
+let currentSiteSettingsId = null;
+
+function onAddProjectTypeChange() {
+    const type = document.getElementById("addProjectType").value;
+    const help = document.getElementById("addProjectTypeHelp");
+    const rootInput = document.getElementById("addRootDirInput");
+    const rootHelp = document.getElementById("addRootDirHelp");
+    const phpSelect = document.getElementById("addPhpVersion");
+
+    if (type === "laravel") {
+        help.innerHTML = "✨ Auto-routes Nginx document root to <code>.../public</code>, sets 775 storage permissions, and configures .env.";
+        help.style.color = "#38bdf8";
+        rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
+        rootHelp.innerHTML = "Leave empty for default path. Nginx will automatically serve the <code>/public</code> subfolder.";
+        phpSelect.disabled = false;
+    } else if (type === "static") {
+        help.innerHTML = "⚡ Pure static HTML/JS site without PHP. Fast static file delivery via Nginx.";
+        help.style.color = "#cbd5e1";
+        rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
+        rootHelp.innerHTML = "Points directly to HTML files or build output directory (e.g. <code>dist</code> or <code>build</code>).";
+        phpSelect.disabled = true;
+    } else {
+        help.innerHTML = "🐘 Standard PHP site (WordPress, CodeIgniter, or custom PHP scripts).";
+        help.style.color = "var(--text-muted)";
+        rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
+        rootHelp.innerHTML = "Web root directory where your <code>index.php</code> is located.";
+        phpSelect.disabled = false;
+    }
+}
+
+function onSettingsProjectTypeChange() {
+    const type = document.getElementById("settingsProjectType").value;
+    const fixCard = document.getElementById("laravelFixCard");
+    const help = document.getElementById("settingsProjectTypeHelp");
+    const phpSelect = document.getElementById("settingsPhpVersion");
+
+    if (type === "laravel") {
+        if (fixCard) fixCard.style.display = "block";
+        help.innerHTML = "Laravel preset routes web traffic to <code>.../public</code>, enables FastCGI rewrite rules, and locks down hidden files.";
+        phpSelect.disabled = false;
+    } else if (type === "static") {
+        if (fixCard) fixCard.style.display = "none";
+        help.innerHTML = "Static preset serves HTML/CSS/JS files directly without PHP-FPM fastcgi processing.";
+        phpSelect.disabled = true;
+    } else {
+        if (fixCard) fixCard.style.display = "none";
+        help.innerHTML = "Standard PHP preset for WordPress, custom PHP applications, and standard scripts.";
+        phpSelect.disabled = false;
+    }
+}
+
+async function triggerFixLaravel() {
+    if (!currentSiteSettingsId) return;
+    const btn = document.getElementById("btnFixLaravel");
+    const origHtml = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<span style="display:inline-block; animation: spin 1s linear infinite;">⏳</span> Running...`;
+
+    showToast("Configuring Laravel permissions, .env, and Nginx...", "success");
+    try {
+        const res = await fetch(`/websites/${currentSiteSettingsId}/fix-laravel`, { method: "POST" });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, "success");
+            setTimeout(() => location.reload(), 1500);
+        } else {
+            showToast(data.error || "Failed to configure Laravel", "danger");
+        }
+    } catch (e) {
+        showToast(`Fix request failed: ${e}`, "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
+}
+
+function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType) {
+    currentSiteSettingsId = id;
+    document.getElementById("settingsSiteId").value = id;
     document.getElementById("settingsModalDomain").innerText = domain;
     document.getElementById("settingsModalDomainInput").value = domain;
     document.getElementById("settingsRootDir").value = rootDir || "";
@@ -388,6 +521,13 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
     document.getElementById("settingsGitRepo").value = gitRepo || "";
     document.getElementById("settingsGitBranch").value = gitBranch || "";
     document.getElementById("settingsDbName").value = dbName || "";
+    
+    const projSelect = document.getElementById("settingsProjectType");
+    if (projSelect) {
+        projSelect.value = projectType || "php";
+    }
+    onSettingsProjectTypeChange();
+
     document.getElementById("siteSettingsForm").action = `/websites/${id}/settings`;
     openModal("siteSettingsModal");
 }

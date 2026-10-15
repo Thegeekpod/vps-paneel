@@ -1,9 +1,11 @@
+import os
 import re
 import secrets
 import shutil
+import subprocess
 import urllib.parse
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Tuple
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.auth import login_required
@@ -38,12 +40,113 @@ async def list_websites(
         "success": success
     }, request)
 
+def setup_laravel_environment(
+    site_root: Path,
+    db_name: Optional[str] = None,
+    db_user: Optional[str] = None,
+    db_pass: Optional[str] = None,
+    php_version: str = "8.3"
+) -> Tuple[bool, str]:
+    """Automates Laravel setup: storage/cache dirs, 775 permissions, .env configuration, and artisan commands."""
+    msgs = []
+    base = site_root.parent if site_root.name == "public" else site_root
+
+    # 1. Ensure storage and bootstrap directories exist
+    dirs_to_create = [
+        base / "storage" / "app" / "public",
+        base / "storage" / "framework" / "cache" / "data",
+        base / "storage" / "framework" / "sessions",
+        base / "storage" / "framework" / "views",
+        base / "storage" / "logs",
+        base / "bootstrap" / "cache",
+        base / "public"
+    ]
+    for d in dirs_to_create:
+        try:
+            d.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
+
+    # 2. Check .env. If .env missing and .env.example exists, copy it
+    env_file = base / ".env"
+    env_example = base / ".env.example"
+    if not env_file.exists() and env_example.exists():
+        try:
+            shutil.copyfile(str(env_example), str(env_file))
+            msgs.append("Created .env from .env.example")
+        except Exception as e:
+            msgs.append(f"Failed to copy .env.example: {e}")
+
+    # 3. If db credentials provided and .env exists, inject them
+    if env_file.exists() and db_name:
+        try:
+            content = env_file.read_text(encoding="utf-8", errors="ignore")
+            replacements = {
+                r'^DB_CONNECTION=.*': 'DB_CONNECTION=mysql',
+                r'^DB_HOST=.*': 'DB_HOST=127.0.0.1',
+                r'^DB_PORT=.*': 'DB_PORT=3306',
+                r'^DB_DATABASE=.*': f'DB_DATABASE={db_name}',
+            }
+            if db_user:
+                replacements[r'^DB_USERNAME=.*'] = f'DB_USERNAME={db_user}'
+            if db_pass:
+                replacements[r'^DB_PASSWORD=.*'] = f'DB_PASSWORD={db_pass}'
+
+            for pat, repl in replacements.items():
+                if re.search(pat, content, flags=re.M):
+                    content = re.sub(pat, repl, content, flags=re.M)
+                else:
+                    content += f"\n{repl}"
+            env_file.write_text(content, encoding="utf-8")
+            msgs.append("Configured database in .env")
+        except Exception as e:
+            msgs.append(f"Failed to update .env DB settings: {e}")
+
+    # 4. Permissions: www-data ownership and 775 on storage & cache
+    try:
+        subprocess.run(["chown", "-R", "www-data:www-data", str(base)], check=False, timeout=15)
+        for sub in ["storage", "bootstrap/cache"]:
+            sub_path = base / sub
+            if sub_path.exists():
+                subprocess.run(["chmod", "-R", "775", str(sub_path)], check=False, timeout=15)
+        msgs.append("Configured 775 permissions on storage & cache")
+    except Exception as e:
+        msgs.append(f"Permission error: {e}")
+
+    # 5. Artisan commands if artisan exists
+    artisan = base / "artisan"
+    if artisan.exists():
+        php_bin = f"php{php_version}" if shutil.which(f"php{php_version}") else "php"
+
+        # Check APP_KEY
+        if env_file.exists():
+            env_content = env_file.read_text(encoding="utf-8", errors="ignore")
+            if "APP_KEY=" in env_content and (not re.search(r'^APP_KEY=base64:|^APP_KEY=\S+', env_content, re.M)):
+                try:
+                    res = subprocess.run([php_bin, "artisan", "key:generate", "--force"], cwd=str(base), capture_output=True, text=True, timeout=15)
+                    if res.returncode == 0:
+                        msgs.append("Generated APP_KEY")
+                except Exception:
+                    pass
+
+        # Clear stale cache and link storage
+        try:
+            subprocess.run([php_bin, "artisan", "config:clear"], cwd=str(base), capture_output=True, timeout=10)
+            subprocess.run([php_bin, "artisan", "cache:clear"], cwd=str(base), capture_output=True, timeout=10)
+            subprocess.run([php_bin, "artisan", "storage:link"], cwd=str(base), capture_output=True, timeout=10)
+            msgs.append("Cleared cache & created storage symlink")
+        except Exception:
+            pass
+
+    return True, "; ".join(msgs) if msgs else "Laravel setup complete"
+
 @router.post("/create")
 async def create_website_action(
     request: Request,
     domain: str = Form(...),
     root_dir: Optional[str] = Form(None),
     php_version: str = Form("8.3"),
+    project_type: str = Form("php"),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
     create_db: Optional[str] = Form(None),
@@ -53,6 +156,10 @@ async def create_website_action(
     user: dict = Depends(login_required)
 ):
     domain = domain.strip().lower()
+    project_type = project_type.strip().lower() if project_type else "php"
+    if project_type not in ["laravel", "php", "static"]:
+        project_type = "php"
+
     if not domain or " " in domain:
         return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Invalid domain name provided')}", status_code=303)
 
@@ -78,10 +185,37 @@ async def create_website_action(
             log_action(user["username"], "CreateWebsiteFailed", f"Domain: {domain}, Git error: {clone_msg}", request.client.host)
             return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Git clone failed: {clone_msg}')}", status_code=303)
     else:
-        # Create default index.html if empty
-        index_file = site_root / "index.html"
-        if not index_file.exists():
-            index_file.write_text(f"""<!DOCTYPE html>
+        if project_type == "laravel":
+            # For Laravel, create public directory and welcoming index.php
+            public_dir = site_root / "public"
+            public_dir.mkdir(parents=True, exist_ok=True)
+            index_file = public_dir / "index.php"
+            if not index_file.exists():
+                index_file.write_text(f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Laravel - {domain}</title>
+    <style>
+        body {{ font-family: -apple-system, sans-serif; text-align: center; padding: 60px 20px; background: #0f172a; color: #f8fafc; }}
+        .card {{ background: #1e293b; padding: 40px; border-radius: 16px; display: inline-block; max-width: 600px; }}
+        h1 {{ color: #f43f5e; }}
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Laravel Application Ready</h1>
+        <p>Domain: <strong>{domain}</strong></p>
+        <p>Upload your Laravel project or clone from Git. Web root is pointed to <code>/public</code>.</p>
+    </div>
+</body>
+</html>
+""")
+        else:
+            # Create default index.html if empty
+            index_file = site_root / "index.html"
+            if not index_file.exists():
+                index_file.write_text(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -114,6 +248,8 @@ async def create_website_action(
 
     # Optional Database Creation
     linked_db_name = None
+    clean_user = None
+    clean_pass = None
     db_info_msg = ""
     should_create_db = create_db in ["1", "true", "on", True]
 
@@ -158,15 +294,19 @@ async def create_website_action(
         else:
             log_action(user["username"], "CreateDatabaseFailed", f"Domain: {domain}, Error: {db_err}", request.client.host)
 
+    # If Laravel, execute Laravel bootstrapping (permissions, .env, artisan)
+    if project_type == "laravel":
+        setup_laravel_environment(site_root, clean_db=linked_db_name, clean_user=clean_user, clean_pass=clean_pass, php_version=php_version)
+
     # Create Nginx VirtualHost
-    vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version)
+    vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version, project_type)
 
     conn = get_db()
     cursor = conn.cursor()
     try:
         cursor.execute(
-            "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name) VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name)
+            "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type)
         )
         conn.commit()
     except Exception as e:
@@ -174,14 +314,14 @@ async def create_website_action(
         return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Website already exists or DB error: {e}')}", status_code=303)
     conn.close()
 
-    action_details = f"Domain: {domain}, Status: {'OK' if vhost_success else vhost_msg}"
+    action_details = f"Domain: {domain}, Type: {project_type}, Status: {'OK' if vhost_success else vhost_msg}"
     if clean_git_repo:
         action_details += f", Git: {clean_git_repo}"
     if linked_db_name:
         action_details += f", DB: {linked_db_name}"
     log_action(user["username"], "CreateWebsite", action_details, request.client.host)
     
-    success_msg = f"Website {domain} created successfully!{db_info_msg}"
+    success_msg = f"Website {domain} ({project_type.capitalize()}) created successfully!{db_info_msg}"
     if clean_git_repo:
         success_msg += " (Repository cloned)"
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(success_msg)}", status_code=303)
@@ -298,10 +438,12 @@ async def sync_vhost_action(site_id: int, request: Request, user: dict = Depends
         conn.close()
         return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
 
-    success, msg = create_vhost(site["domain"], site["root_dir"], site["php_version"])
+    site_keys = site.keys()
+    project_type = site["project_type"] if "project_type" in site_keys and site["project_type"] else "php"
+    success, msg = create_vhost(site["domain"], site["root_dir"], site["php_version"], project_type)
     conn.close()
 
-    log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Result: {msg}", request.client.host)
+    log_action(user["username"], "SyncVhost", f"Domain: {site['domain']}, Preset: {project_type}, Result: {msg}", request.client.host)
     return JSONResponse({"success": success, "message": msg})
 
 @router.post("/{site_id}/git-pull")
@@ -315,18 +457,23 @@ async def pull_website_git(site_id: int, request: Request, user: dict = Depends(
         return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
 
     root_dir = site["root_dir"]
+    site_keys = site.keys()
+    project_type = site["project_type"] if "project_type" in site_keys and site["project_type"] else "php"
     success, msg = pull_repository(root_dir)
     
     # Re-apply permissions if git pull modified/created files
     if success:
         try:
             site_root = Path(root_dir)
-            shutil.chown(str(site_root), user="www-data", group="www-data")
-            for p in site_root.glob("**/*"):
-                try:
-                    shutil.chown(str(p), user="www-data", group="www-data")
-                except Exception:
-                    pass
+            if project_type == "laravel":
+                setup_laravel_environment(site_root, php_version=site["php_version"])
+            else:
+                shutil.chown(str(site_root), user="www-data", group="www-data")
+                for p in site_root.glob("**/*"):
+                    try:
+                        shutil.chown(str(p), user="www-data", group="www-data")
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -339,6 +486,7 @@ async def update_website_settings(
     request: Request,
     root_dir: str = Form(...),
     php_version: str = Form("8.3"),
+    project_type: str = Form("php"),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
     db_name: Optional[str] = Form(None),
@@ -353,6 +501,10 @@ async def update_website_settings(
         return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Website not found')}", status_code=303)
 
     domain = site["domain"]
+    project_type = project_type.strip().lower() if project_type else "php"
+    if project_type not in ["laravel", "php", "static"]:
+        project_type = "php"
+
     clean_root_dir = root_dir.strip()
     if not clean_root_dir:
         conn.close()
@@ -369,8 +521,8 @@ async def update_website_settings(
     clean_git_branch = git_branch.strip() if git_branch else ""
     clean_db_name = db_name.strip() if db_name and db_name.strip() else None
 
-    # Reconfigure Nginx vhost with new root_dir and php_version
-    vhost_success, vhost_msg = create_vhost(domain, str(new_root), php_version)
+    # Reconfigure Nginx vhost with new root_dir, php_version, and project_type
+    vhost_success, vhost_msg = create_vhost(domain, str(new_root), php_version, project_type)
     if not vhost_success:
         conn.close()
         return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Nginx configuration failed: {vhost_msg}')}", status_code=303)
@@ -386,12 +538,64 @@ async def update_website_settings(
     except Exception:
         pass
 
+    if project_type == "laravel":
+        setup_laravel_environment(new_root, clean_db_name, php_version=php_version)
+
     cursor.execute(
-        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ? WHERE id = ?",
-        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, site_id)
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, site_id)
     )
     conn.commit()
     conn.close()
 
-    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Root: {new_root}, PHP: {php_version}", request.client.host)
-    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain}')}", status_code=303)
+    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, PHP: {php_version}", request.client.host)
+    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain} ({project_type.capitalize()})')}", status_code=303)
+
+@router.post("/{site_id}/fix-laravel")
+async def fix_laravel_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    if not site:
+        conn.close()
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    domain = site["domain"]
+    root_dir = site["root_dir"]
+    php_version = site["php_version"] or "8.3"
+    site_keys = site.keys()
+    db_name = site["db_name"] if "db_name" in site_keys else None
+
+    # Fetch DB credentials if present
+    db_user = None
+    db_pass = None
+    if db_name:
+        cursor.execute("SELECT db_user, db_pass FROM databases WHERE db_name = ?", (db_name,))
+        db_row = cursor.fetchone()
+        if db_row:
+            db_user = db_row["db_user"]
+            db_pass = db_row["db_pass"]
+
+    # 1. Update Nginx vhost with Laravel preset
+    vhost_ok, vhost_msg = create_vhost(domain, root_dir, php_version, "laravel")
+
+    # 2. Run Laravel environment setup (storage, bootstrap/cache, 775, .env, artisan)
+    setup_ok, setup_msg = setup_laravel_environment(
+        Path(root_dir),
+        db_name=db_name,
+        db_user=db_user,
+        db_pass=db_pass,
+        php_version=php_version
+    )
+
+    # 3. Save project_type = 'laravel' in DB
+    cursor.execute("UPDATE websites SET project_type = 'laravel' WHERE id = ?", (site_id,))
+    conn.commit()
+    conn.close()
+
+    log_action(user["username"], "FixLaravel", f"Domain: {domain}, Nginx: {vhost_msg}, Setup: {setup_msg}", request.client.host)
+    return JSONResponse({
+        "success": True,
+        "message": f"Laravel configured! {setup_msg}. Nginx: {vhost_msg}"
+    })

@@ -42,6 +42,7 @@ def init_db():
         git_repo TEXT,
         git_branch TEXT,
         db_name TEXT,
+        project_type TEXT DEFAULT 'php',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
@@ -57,6 +58,10 @@ def init_db():
         pass
     try:
         cursor.execute("ALTER TABLE websites ADD COLUMN db_name TEXT")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN project_type TEXT DEFAULT 'php'")
     except Exception:
         pass
 
