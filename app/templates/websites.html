@@ -506,15 +506,15 @@
 
 <!-- SSL Certificate Manager Modal -->
 <div id="sslManagerModal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 540px; max-height: 90vh; overflow-y: auto;">
+    <div class="modal-box" style="max-width: 600px; max-height: 90vh; overflow-y: auto;">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <h3 style="font-size: 17px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
                 <span>🔒</span> SSL Manager: <span id="sslModalDomain" style="color: var(--accent);"></span>
             </h3>
             <button type="button" onclick="closeModal('sslManagerModal')" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;">✕</button>
         </div>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 18px;">
-            Manage automated Let's Encrypt certificates, active HTTPS status, Nginx bindings, and Force HTTPS redirection.
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">
+            Manage automated Let's Encrypt certificates, verification modes, DNS pre-checks, and Nginx bindings.
         </p>
 
         <!-- Loading State -->
@@ -526,8 +526,8 @@
         <!-- Main SSL Content -->
         <div id="sslStatusContent" style="display: none;">
             <!-- Current Status Box -->
-            <div style="background: #0f172a; border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-bottom: 18px;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 10px;">
+            <div style="background: #0f172a; border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px;">
                     <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600;">Certificate Status</span>
                     <span id="sslBadgeStatus" class="badge">Checking...</span>
                 </div>
@@ -548,41 +548,111 @@
                 </div>
             </div>
 
-            <!-- Email for Let's Encrypt -->
-            <div style="margin-bottom: 18px;">
-                <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">
-                    Contact Email for Let's Encrypt
-                </label>
-                <input type="email" id="sslContactEmail" placeholder="admin@domain.com" style="width: 100%; font-size: 13px;">
-                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Used by Let's Encrypt for urgent renewal and security notices.</span>
+            <!-- Verification Method Selector -->
+            <div style="margin-bottom: 16px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <label style="font-size: 12px; color: var(--text-secondary); font-weight: 600;">
+                        Certbot Challenge Mode:
+                    </label>
+                    <span style="font-size: 11px; color: var(--text-muted);">Choose how Certbot verifies domain</span>
+                </div>
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                    <label id="card_method_nginx" style="cursor: pointer; border: 1px solid var(--accent); border-radius: 8px; padding: 10px; background: rgba(56, 189, 248, 0.08); display: flex; flex-direction: column; gap: 4px; transition: all 0.2s ease;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="radio" name="sslMethod" value="nginx" checked onchange="updateSslMethodUI()">
+                            <span style="font-size: 12px; font-weight: 700; color: #38bdf8;">⚡ Nginx</span>
+                        </div>
+                        <span style="font-size: 10px; color: var(--text-muted); line-height: 1.3;">Auto-patches Nginx. Fixes rewrite & routing issues.</span>
+                    </label>
+                    <label id="card_method_webroot" style="cursor: pointer; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(15, 23, 42, 0.6); display: flex; flex-direction: column; gap: 4px; transition: all 0.2s ease;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="radio" name="sslMethod" value="webroot" onchange="updateSslMethodUI()">
+                            <span style="font-size: 12px; font-weight: 700; color: #f8fafc;">📁 Webroot</span>
+                        </div>
+                        <span style="font-size: 10px; color: var(--text-muted); line-height: 1.3;">Writes challenge token to .well-known folder.</span>
+                    </label>
+                    <label id="card_method_standalone" style="cursor: pointer; border: 1px solid var(--border); border-radius: 8px; padding: 10px; background: rgba(15, 23, 42, 0.6); display: flex; flex-direction: column; gap: 4px; transition: all 0.2s ease;">
+                        <div style="display: flex; align-items: center; gap: 6px;">
+                            <input type="radio" name="sslMethod" value="standalone" onchange="updateSslMethodUI()">
+                            <span style="font-size: 12px; font-weight: 700; color: #fbbf24;">🛑 Standalone</span>
+                        </div>
+                        <span style="font-size: 10px; color: var(--text-muted); line-height: 1.3;">Frees Port 80 directly. Bypasses all Nginx rules.</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Email & Subdomain Options Row -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+                <div>
+                    <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">
+                        Contact Email
+                    </label>
+                    <input type="email" id="sslContactEmail" placeholder="admin@domain.com" style="width: 100%; font-size: 12px; padding: 7px 10px;">
+                </div>
+                <div style="display: flex; flex-direction: column; justify-content: flex-end;">
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary); padding: 7px 0;">
+                        <input type="checkbox" id="sslIncludeWww" style="width: 14px; height: 14px;">
+                        <span>Include <strong>www</strong> subdomain</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- DNS & Port Pre-Check Tool Row -->
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; padding: 8px 12px; background: rgba(15, 23, 42, 0.6); border: 1px dashed var(--border); border-radius: 8px;">
+                <span style="font-size: 11px; color: var(--text-muted);">Check if domain DNS & Port 80 are ready:</span>
+                <button type="button" onclick="runSslPrecheck()" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px;">
+                    🔍 Test Pre-Check
+                </button>
+            </div>
+
+            <!-- Precheck Output Box -->
+            <div id="sslPrecheckContainer" style="display: none; background: #090d16; border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                    <strong style="color: var(--accent); font-size: 11px; text-transform: uppercase;">Pre-Flight Diagnostics</strong>
+                    <button type="button" onclick="document.getElementById('sslPrecheckContainer').style.display='none'" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px;">✕</button>
+                </div>
+                <div id="sslPrecheckBody" style="line-height: 1.5;"></div>
             </div>
 
             <!-- Action Buttons Grid -->
-            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+            <div style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px;">
                 <!-- Issue / Renew Button -->
-                <button type="button" id="btnSslIssue" onclick="performSslAction('issue')" class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 11px;">
+                <button type="button" id="btnSslIssue" onclick="performSslAction('issue')" class="btn btn-primary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px;">
                     <span>🚀</span> <span id="lblSslIssue">Activate SSL Certificate</span>
                 </button>
 
                 <!-- Reinstall Button (Force Renewal) -->
-                <button type="button" id="btnSslReinstall" onclick="performSslAction('reinstall')" class="btn btn-secondary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px; border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc;">
+                <button type="button" id="btnSslReinstall" onclick="performSslAction('reinstall')" class="btn btn-secondary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 9px; border-color: rgba(99, 102, 241, 0.4); color: #a5b4fc;">
                     <span>🔄</span> Reinstall / Force Renewal
                 </button>
 
                 <!-- Re-apply to Nginx Button -->
-                <button type="button" id="btnSslReapply" onclick="performSslAction('reapply')" class="btn btn-secondary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px;" title="Re-links existing certificate to Nginx without contacting Let's Encrypt">
+                <button type="button" id="btnSslReapply" onclick="performSslAction('reapply')" class="btn btn-secondary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 9px;" title="Re-links existing certificate to Nginx without contacting Let's Encrypt">
                     <span>⚡</span> Re-apply to Nginx (Fix Lost HTTPS Binding)
                 </button>
 
                 <!-- Force HTTPS Toggle -->
-                <button type="button" id="btnSslForceHttps" onclick="performSslAction('toggle_force_https')" class="btn btn-secondary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px;">
+                <button type="button" id="btnSslForceHttps" onclick="performSslAction('toggle_force_https')" class="btn btn-secondary" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 9px;">
                     <span>🔀</span> <span id="lblSslForceHttps">Force HTTPS: Loading...</span>
                 </button>
 
                 <!-- Delete SSL Button -->
-                <button type="button" id="btnSslDelete" onclick="performSslAction('delete')" class="btn btn-danger" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 10px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171;">
+                <button type="button" id="btnSslDelete" onclick="performSslAction('delete')" class="btn btn-danger" style="display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 9px; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171;">
                     <span>🗑️</span> Delete Certificate & Remove from Nginx
                 </button>
+            </div>
+
+            <!-- Troubleshooting & Log Viewer Section -->
+            <div style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 10px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <span style="font-size: 11px; color: var(--text-muted);">Certbot Troubleshooting:</span>
+                    <button type="button" onclick="toggleCertbotLog()" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;">
+                        📜 View Certbot Log
+                    </button>
+                </div>
+                <div id="sslLogContainer" style="display: none; margin-top: 8px; background: #000; border: 1px solid var(--border); border-radius: 6px; padding: 10px; max-height: 180px; overflow-y: auto;">
+                    <pre id="sslLogText" style="font-size: 11px; color: #a5f3fc; font-family: monospace; white-space: pre-wrap; margin: 0;">Loading log...</pre>
+                </div>
             </div>
         </div>
 
@@ -895,9 +965,110 @@ async function openSslModal(siteId, domain, rootDir) {
     document.getElementById("sslContactEmail").value = `admin@${domain}`;
     document.getElementById("sslStatusLoading").style.display = "block";
     document.getElementById("sslStatusContent").style.display = "none";
+    document.getElementById("sslPrecheckContainer").style.display = "none";
+    document.getElementById("sslLogContainer").style.display = "none";
 
     openModal("sslManagerModal");
     await reloadSslStatus();
+}
+
+function updateSslMethodUI() {
+    const selected = document.querySelector('input[name="sslMethod"]:checked')?.value || "nginx";
+    ["nginx", "webroot", "standalone"].forEach(m => {
+        const card = document.getElementById(`card_method_${m}`);
+        if (card) {
+            if (m === selected) {
+                card.style.borderColor = m === "standalone" ? "#fbbf24" : "var(--accent)";
+                card.style.background = m === "standalone" ? "rgba(251, 191, 36, 0.1)" : "rgba(56, 189, 248, 0.1)";
+            } else {
+                card.style.borderColor = "var(--border)";
+                card.style.background = "rgba(15, 23, 42, 0.6)";
+            }
+        }
+    });
+}
+
+async function runSslPrecheck() {
+    if (!currentSslSiteId) return;
+    const precheckBody = document.getElementById("sslPrecheckBody");
+    const container = document.getElementById("sslPrecheckContainer");
+    container.style.display = "block";
+    precheckBody.innerHTML = `<span style="color: var(--text-muted);">Running DNS and Port 80 checks for ${currentSslDomain}...</span>`;
+
+    try {
+        const res = await fetch(`/websites/${currentSslSiteId}/ssl-diagnose`);
+        const result = await res.json();
+        if (result.success && result.data) {
+            const d = result.data;
+            let html = "";
+
+            // DNS check
+            if (d.resolved_ip) {
+                html += `<div><strong>Domain DNS:</strong> <span style="color: #38bdf8;">${d.resolved_ip}</span></div>`;
+            } else {
+                html += `<div><strong>Domain DNS:</strong> <span style="color: #f87171;">Failed to resolve</span></div>`;
+            }
+
+            if (d.server_ip) {
+                html += `<div><strong>Server Public IP:</strong> <span>${d.server_ip}</span> ${d.dns_match ? '<span class="badge badge-success" style="font-size: 10px;">Matched</span>' : '<span class="badge badge-warning" style="font-size: 10px;">Mismatch</span>'}</div>`;
+            }
+
+            // Port 80
+            html += `<div><strong>Port 80 (HTTP):</strong> ${d.port_80_open ? '<span style="color: #34d399;">Listening</span>' : '<span style="color: #fbbf24;">Closed / Not listening locally</span>'}</div>`;
+
+            // Webroot
+            html += `<div><strong>Challenge Directory:</strong> ${d.acme_test_ok ? '<span style="color: #34d399;">Writable (.well-known)</span>' : '<span style="color: #f87171;">Failed write test</span>'}</div>`;
+
+            if (d.is_cloudflare) {
+                html += `<div style="margin-top: 6px; padding: 6px 8px; background: rgba(245, 158, 11, 0.15); border-left: 3px solid #f59e0b; border-radius: 4px; color: #fbbf24;">
+                    ⚠️ <strong>Cloudflare Proxy Detected:</strong> Switch to Grey Cloud (DNS Only) in Cloudflare DNS before issuing SSL.
+                </div>`;
+            }
+
+            if (d.warnings && d.warnings.length > 0) {
+                d.warnings.forEach(w => {
+                    if (!d.is_cloudflare || !w.includes("Cloudflare")) {
+                        html += `<div style="color: #fbbf24; margin-top: 4px;">• ${w}</div>`;
+                    }
+                });
+            }
+
+            if (d.errors && d.errors.length > 0) {
+                d.errors.forEach(e => {
+                    html += `<div style="color: #f87171; margin-top: 4px;">✗ ${e}</div>`;
+                });
+            }
+
+            precheckBody.innerHTML = html;
+        } else {
+            precheckBody.innerHTML = `<span style="color: #f87171;">Diagnosis failed: ${result.error || "Unknown error"}</span>`;
+        }
+    } catch (err) {
+        precheckBody.innerHTML = `<span style="color: #f87171;">Pre-check error: ${err}</span>`;
+    }
+}
+
+async function toggleCertbotLog() {
+    const container = document.getElementById("sslLogContainer");
+    const pre = document.getElementById("sslLogText");
+    if (container.style.display === "block") {
+        container.style.display = "none";
+        return;
+    }
+
+    container.style.display = "block";
+    pre.innerText = "Loading Certbot log...";
+    try {
+        const res = await fetch(`/websites/${currentSslSiteId}/ssl-log`);
+        const result = await res.json();
+        if (result.success && result.log) {
+            pre.innerText = result.log;
+        } else {
+            pre.innerText = "No Certbot log available or error reading file.";
+        }
+    } catch (e) {
+        pre.innerText = "Failed to load log: " + e;
+    }
 }
 
 function openSslModalFromSettings() {
@@ -990,11 +1161,16 @@ async function performSslAction(action) {
     }
 
     const email = document.getElementById("sslContactEmail").value.trim();
-    showToast(`Processing SSL action (${action}) for ${currentSslDomain}...`, "success");
+    const method = document.querySelector('input[name="sslMethod"]:checked')?.value || "nginx";
+    const includeWww = document.getElementById("sslIncludeWww").checked ? "1" : "0";
+
+    showToast(`Processing SSL action (${action}) using ${method.toUpperCase()} mode...`, "success");
 
     const formData = new FormData();
     formData.append("action", action);
     formData.append("email", email);
+    formData.append("method", method);
+    formData.append("include_www", includeWww);
 
     // Disable action buttons during processing
     const buttons = document.querySelectorAll("#sslStatusContent button");
@@ -1011,6 +1187,10 @@ async function performSslAction(action) {
             await reloadSslStatus();
         } else {
             showToast(data.message || data.error || "SSL action failed", "danger");
+            // Auto open certbot log if challenge failed
+            if ((data.message || "").includes("challenges have failed") || (data.message || "").includes("Certbot error")) {
+                toggleCertbotLog();
+            }
         }
     } catch (e) {
         showToast(`Request failed: ${e}`, "danger");

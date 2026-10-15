@@ -3,6 +3,7 @@ import shutil
 import subprocess
 import zipfile
 import json
+import inspect
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, List
@@ -347,7 +348,7 @@ async def upload_files(
     try:
         form = await request.form()
         path = form.get("path", "")
-        if isinstance(path, UploadFile):
+        if hasattr(path, "filename"):
             path = ""
         else:
             path = str(path or "").strip()
@@ -355,39 +356,58 @@ async def upload_files(
         target_dir = resolve_safe_path(WEB_ROOT, path)
         target_dir.mkdir(parents=True, exist_ok=True)
 
-        file_list = form.getlist("files")
+        # Collect all file items from form regardless of field key or starlette vs fastapi type
+        file_list = []
+        if hasattr(form, "multi_items"):
+            for key, val in form.multi_items():
+                if getattr(val, "filename", None):
+                    file_list.append(val)
+
         if not file_list:
-            file_list = form.getlist("files[]")
-        if not file_list:
-            file_list = form.getlist("file")
-        if not file_list:
-            single = form.get("file") or form.get("files")
-            if single:
-                file_list = [single]
+            for key in ("files", "files[]", "file"):
+                for val in form.getlist(key):
+                    if getattr(val, "filename", None):
+                        file_list.append(val)
+
+        if not file_list and hasattr(form, "values"):
+            for val in form.values():
+                if getattr(val, "filename", None):
+                    file_list.append(val)
 
         uploaded = []
         errors = []
 
         for item in file_list:
-            if not isinstance(item, UploadFile):
-                continue
-            filename = item.filename
+            filename = getattr(item, "filename", None)
             if not filename:
                 continue
 
-            safe_name = os.path.basename(filename.replace("\\", "/"))
+            safe_name = os.path.basename(str(filename).replace("\\", "/"))
             if not safe_name:
                 continue
 
             dest = target_dir / safe_name
             try:
                 with open(dest, "wb") as buffer:
-                    while True:
-                        chunk = await item.read(1024 * 1024)
-                        if not chunk:
-                            break
-                        buffer.write(chunk)
-                await item.close()
+                    if hasattr(item, "read"):
+                        res = item.read(1024 * 1024)
+                        if inspect.iscoroutine(res):
+                            chunk = await res
+                            while chunk:
+                                buffer.write(chunk)
+                                chunk = await item.read(1024 * 1024)
+                        else:
+                            chunk = res
+                            while chunk:
+                                buffer.write(chunk)
+                                chunk = item.read(1024 * 1024)
+                    elif hasattr(item, "file"):
+                        shutil.copyfileobj(item.file, buffer)
+
+                if hasattr(item, "close"):
+                    res = item.close()
+                    if inspect.iscoroutine(res):
+                        await res
 
                 try:
                     os.chmod(dest, 0o664)

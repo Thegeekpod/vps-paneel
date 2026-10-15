@@ -12,7 +12,7 @@ from app.auth import login_required
 from app.config import WEB_ROOT
 from app.database import get_db, log_action
 from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx, restore_ssl_for_existing_domains
-from app.services.ssl_service import issue_ssl, remove_ssl, get_ssl_info, inject_ssl_into_vhost, toggle_force_https
+from app.services.ssl_service import issue_ssl, remove_ssl, get_ssl_info, inject_ssl_into_vhost, toggle_force_https, diagnose_domain_ssl, get_certbot_log
 from app.services.git_service import clone_repository, pull_repository
 from app.services.database_service import create_db_and_user, drop_db_and_user
 from app.templates_util import render
@@ -464,6 +464,8 @@ async def manage_site_ssl(
     request: Request,
     action: str = Form(...),
     email: Optional[str] = Form(None),
+    method: Optional[str] = Form("webroot"),
+    include_www: Optional[str] = Form("0"),
     user: dict = Depends(login_required)
 ):
     conn = get_db()
@@ -477,16 +479,20 @@ async def manage_site_ssl(
     domain = site["domain"]
     root_dir = site["root_dir"]
     clean_email = email.strip() if email else f"admin@{domain}"
+    clean_method = method.strip().lower() if method else "webroot"
+    if clean_method not in ["webroot", "nginx", "standalone"]:
+        clean_method = "webroot"
+    with_www = include_www in ["1", "true", "on", True]
     client_ip = get_client_ip(request)
 
     if action in ["issue", "reinstall"]:
         force = (action == "reinstall")
-        success, msg = issue_ssl(domain, root_dir, clean_email, force_renewal=force)
+        success, msg = issue_ssl(domain, root_dir, clean_email, force_renewal=force, method=clean_method, include_www=with_www)
         if success:
             cursor.execute("UPDATE websites SET ssl_enabled = 1 WHERE id = ?", (site_id,))
             conn.commit()
         conn.close()
-        log_action(user["username"], "IssueSSL" if not force else "ReinstallSSL", f"Domain: {domain}, Result: {msg}", client_ip)
+        log_action(user["username"], "IssueSSL" if not force else "ReinstallSSL", f"Domain: {domain}, Method: {clean_method}, WWW: {with_www}, Result: {msg}", client_ip)
         return JSONResponse({"success": success, "message": msg})
 
     elif action == "delete":
@@ -516,6 +522,38 @@ async def manage_site_ssl(
 
     conn.close()
     return JSONResponse({"success": False, "error": "Unknown SSL action"}, status_code=400)
+
+@router.get("/{site_id}/ssl-diagnose")
+async def diagnose_site_ssl(
+    site_id: int,
+    user: dict = Depends(login_required)
+):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    diagnosis = diagnose_domain_ssl(site["domain"], site["root_dir"])
+    return JSONResponse({"success": True, "data": diagnosis})
+
+@router.get("/{site_id}/ssl-log")
+async def get_site_ssl_log(
+    site_id: int,
+    user: dict = Depends(login_required)
+):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    log_content = get_certbot_log(70)
+    return JSONResponse({"success": True, "log": log_content})
 
 @router.post("/{site_id}/ssl")
 async def issue_ssl_action(site_id: int, request: Request, user: dict = Depends(login_required)):

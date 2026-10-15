@@ -1,10 +1,12 @@
 import os
 import re
 import shutil
+import socket
 import subprocess
+import urllib.request
 from datetime import datetime
 from pathlib import Path
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Optional
 from app.config import NGINX_AVAILABLE, LETSENCRYPT_DIR
 from app.services.nginx_service import test_and_reload_nginx
 
@@ -124,8 +126,115 @@ def strip_ssl_from_vhost(domain: str) -> Tuple[bool, str]:
     except Exception as e:
         return False, str(e)
 
-def issue_ssl(domain: str, webroot: str, email: str = "", force_renewal: bool = False) -> Tuple[bool, str]:
-    """Issues or force-renews Let's Encrypt SSL certificate for a domain using Certbot."""
+def get_server_public_ip() -> str:
+    """Detects public IP of this server."""
+    for url in ["https://api.ipify.org", "https://ifconfig.me/ip", "https://icanhazip.com"]:
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "curl/7.68.0"})
+            with urllib.request.urlopen(req, timeout=3) as resp:
+                ip = resp.read().decode().strip()
+                if ip:
+                    return ip
+        except Exception:
+            continue
+    return ""
+
+def diagnose_domain_ssl(domain: str, webroot: str) -> Dict[str, Any]:
+    """Runs DNS, Port 80, and challenge pre-flight checks for SSL issuance."""
+    report = {
+        "domain": domain,
+        "resolved_ip": None,
+        "www_resolved_ip": None,
+        "server_ip": None,
+        "dns_match": False,
+        "is_cloudflare": False,
+        "port_80_open": False,
+        "webroot_ok": False,
+        "acme_test_ok": False,
+        "warnings": [],
+        "errors": []
+    }
+
+    server_ip = get_server_public_ip()
+    report["server_ip"] = server_ip
+
+    # Check main domain DNS
+    try:
+        domain_ip = socket.gethostbyname(domain)
+        report["resolved_ip"] = domain_ip
+
+        # Check Cloudflare IP prefixes
+        cf_prefixes = ("104.16.", "104.17.", "104.18.", "104.19.", "104.20.", "104.21.", "172.64.", "172.67.", "108.162.", "162.158.", "188.114.")
+        if any(domain_ip.startswith(p) for p in cf_prefixes):
+            report["is_cloudflare"] = True
+            report["warnings"].append("Cloudflare Proxy (Orange Cloud) detected on DNS. Certbot HTTP challenges often fail behind Cloudflare proxy. Temporarily switch to 'DNS Only (Grey Cloud)' in Cloudflare.")
+
+        if server_ip and domain_ip == server_ip:
+            report["dns_match"] = True
+        elif server_ip:
+            report["warnings"].append(f"Domain resolves to {domain_ip}, but server public IP is {server_ip}. If not using a reverse proxy or CDN, Let's Encrypt cannot reach this server.")
+    except Exception as e:
+        report["errors"].append(f"DNS Resolution failed for '{domain}': {e}. Verify domain A-record.")
+
+    # Check www subdomain
+    try:
+        www_ip = socket.gethostbyname(f"www.{domain}")
+        report["www_resolved_ip"] = www_ip
+    except Exception:
+        report["www_resolved_ip"] = None
+
+    # Check port 80 local listening
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(2)
+            res = s.connect_ex(('127.0.0.1', 80))
+            if res == 0:
+                report["port_80_open"] = True
+            else:
+                report["warnings"].append("Port 80 is not currently listening locally on 127.0.0.1.")
+    except Exception as e:
+        report["warnings"].append(f"Port 80 check: {e}")
+
+    # Check webroot & challenge dir write test
+    try:
+        wr_path = Path(webroot)
+        if wr_path.exists() and wr_path.is_dir():
+            report["webroot_ok"] = True
+            acme_dir = wr_path / ".well-known" / "acme-challenge"
+            acme_dir.mkdir(parents=True, exist_ok=True)
+            test_file = acme_dir / "precheck.tmp"
+            test_file.write_text("ok")
+            test_file.unlink(missing_ok=True)
+            report["acme_test_ok"] = True
+        else:
+            report["errors"].append(f"Webroot path '{webroot}' does not exist.")
+    except Exception as e:
+        report["errors"].append(f"Webroot write test error: {e}")
+
+    return report
+
+def get_certbot_log(lines_count: int = 60) -> str:
+    """Reads recent log entries from /var/log/letsencrypt/letsencrypt.log."""
+    log_file = Path("/var/log/letsencrypt/letsencrypt.log")
+    if not log_file.exists():
+        return "No Certbot log file found at /var/log/letsencrypt/letsencrypt.log"
+    try:
+        content = log_file.read_text(errors="replace")
+        lines = content.splitlines()
+        last = lines[-lines_count:] if len(lines) > lines_count else lines
+        return "\n".join(last)
+    except Exception as e:
+        return f"Error reading certbot log: {e}"
+
+def issue_ssl(
+    domain: str,
+    webroot: str,
+    email: str = "",
+    force_renewal: bool = False,
+    method: str = "webroot", # "webroot", "nginx", "standalone"
+    include_www: bool = False
+) -> Tuple[bool, str]:
+    """Issues or force-renews Let's Encrypt SSL certificate using Certbot with chosen method."""
     if not email:
         email = f"admin@{domain}"
 
@@ -137,34 +246,64 @@ def issue_ssl(domain: str, webroot: str, email: str = "", force_renewal: bool = 
         (sim_dir / "fullchain.pem").write_text("SIMULATED_CERT")
         (sim_dir / "privkey.pem").write_text("SIMULATED_KEY")
         inject_ssl_into_vhost(domain)
-        return True, "Simulated SSL Certificate issued successfully."
+        return True, f"Simulated SSL Certificate issued successfully ({method.title()} mode)."
 
-    # Direct certbot execution with root privileges
     cmd = [
         certbot_bin, "certonly",
-        "--webroot", "-w", webroot,
-        "-d", domain,
         "--non-interactive", "--agree-tos",
         "--email", email,
+        "-d", domain
     ]
+    if include_www:
+        cmd.extend(["-d", f"www.{domain}"])
+
     if force_renewal:
         cmd.append("--force-renewal")
     else:
         cmd.append("--keep-until-expiring")
 
+    stopped_nginx = False
     try:
+        if method == "nginx":
+            cmd.append("--nginx")
+        elif method == "standalone":
+            # Standalone needs port 80 free, temporarily stop Nginx
+            subprocess.run(["systemctl", "stop", "nginx"], check=False, timeout=15)
+            stopped_nginx = True
+            cmd.append("--standalone")
+        else: # "webroot"
+            acme_dir = Path(webroot) / ".well-known" / "acme-challenge"
+            try:
+                acme_dir.mkdir(parents=True, exist_ok=True)
+                os.chmod(Path(webroot) / ".well-known", 0o755)
+                os.chmod(acme_dir, 0o755)
+            except Exception:
+                pass
+            cmd.extend(["--webroot", "-w", webroot])
+
         res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=120)
+
+        # Always restore Nginx if we stopped it
+        if stopped_nginx:
+            subprocess.run(["systemctl", "start", "nginx"], check=False, timeout=15)
+            stopped_nginx = False
+
         if res.returncode != 0:
             err = res.stderr.strip() or res.stdout.strip() or "Unknown certbot error"
-            return False, f"Certbot error: {err}"
+            return False, f"Certbot error ({method} mode): {err}"
 
         # Inject SSL into Nginx config
         ok, msg = inject_ssl_into_vhost(domain)
         if not ok:
             return False, f"SSL issued, but Nginx configuration failed: {msg}"
 
-        return True, "SSL Certificate issued and activated in Nginx!"
+        return True, f"SSL Certificate issued and activated in Nginx using {method.title()} mode!"
     except Exception as e:
+        if stopped_nginx:
+            try:
+                subprocess.run(["systemctl", "start", "nginx"], check=False, timeout=15)
+            except Exception:
+                pass
         return False, str(e)
 
 def remove_ssl(domain: str) -> Tuple[bool, str]:
