@@ -12,7 +12,7 @@ from app.auth import login_required
 from app.config import WEB_ROOT
 from app.database import get_db, log_action
 from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx, restore_ssl_for_existing_domains
-from app.services.ssl_service import issue_ssl, remove_ssl
+from app.services.ssl_service import issue_ssl, remove_ssl, get_ssl_info, inject_ssl_into_vhost, toggle_force_https
 from app.services.git_service import clone_repository, pull_repository
 from app.services.database_service import create_db_and_user, drop_db_and_user
 from app.templates_util import render
@@ -444,8 +444,28 @@ async def delete_website_action(
     log_action(user["username"], "DeleteWebsite", f"Deleted {domain}{info_str}", get_client_ip(request))
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Website {domain} deleted successfully{info_str}')}", status_code=303)
 
-@router.post("/{site_id}/ssl")
-async def issue_ssl_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+@router.get("/{site_id}/ssl-status")
+async def get_site_ssl_status(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    info = get_ssl_info(site["domain"])
+    info["db_ssl_enabled"] = bool(site["ssl_enabled"])
+    return JSONResponse({"success": True, "data": info})
+
+@router.post("/{site_id}/ssl-manage")
+async def manage_site_ssl(
+    site_id: int,
+    request: Request,
+    action: str = Form(...),
+    email: Optional[str] = Form(None),
+    user: dict = Depends(login_required)
+):
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
@@ -456,15 +476,51 @@ async def issue_ssl_action(site_id: int, request: Request, user: dict = Depends(
 
     domain = site["domain"]
     root_dir = site["root_dir"]
+    clean_email = email.strip() if email else f"admin@{domain}"
+    client_ip = get_client_ip(request)
 
-    success, msg = issue_ssl(domain, root_dir)
-    if success:
-        cursor.execute("UPDATE websites SET ssl_enabled = 1 WHERE id = ?", (site_id,))
+    if action in ["issue", "reinstall"]:
+        force = (action == "reinstall")
+        success, msg = issue_ssl(domain, root_dir, clean_email, force_renewal=force)
+        if success:
+            cursor.execute("UPDATE websites SET ssl_enabled = 1 WHERE id = ?", (site_id,))
+            conn.commit()
+        conn.close()
+        log_action(user["username"], "IssueSSL" if not force else "ReinstallSSL", f"Domain: {domain}, Result: {msg}", client_ip)
+        return JSONResponse({"success": success, "message": msg})
+
+    elif action == "delete":
+        success, msg = remove_ssl(domain)
+        cursor.execute("UPDATE websites SET ssl_enabled = 0 WHERE id = ?", (site_id,))
         conn.commit()
-    conn.close()
+        conn.close()
+        log_action(user["username"], "DeleteSSL", f"Domain: {domain}, Result: {msg}", client_ip)
+        return JSONResponse({"success": success, "message": msg})
 
-    log_action(user["username"], "IssueSSL", f"Domain: {domain}, Result: {msg}", get_client_ip(request))
-    return JSONResponse({"success": success, "message": msg})
+    elif action == "reapply":
+        success, msg = inject_ssl_into_vhost(domain)
+        if success:
+            cursor.execute("UPDATE websites SET ssl_enabled = 1 WHERE id = ?", (site_id,))
+            conn.commit()
+        conn.close()
+        log_action(user["username"], "ReapplySSL", f"Domain: {domain}, Result: {msg}", client_ip)
+        return JSONResponse({"success": success, "message": msg})
+
+    elif action == "toggle_force_https":
+        info = get_ssl_info(domain)
+        new_state = not info.get("force_https", False)
+        success, msg = toggle_force_https(domain, new_state)
+        conn.close()
+        log_action(user["username"], "ToggleForceHTTPS", f"Domain: {domain}, State: {new_state}, Result: {msg}", client_ip)
+        return JSONResponse({"success": success, "message": msg, "force_https": new_state})
+
+    conn.close()
+    return JSONResponse({"success": False, "error": "Unknown SSL action"}, status_code=400)
+
+@router.post("/{site_id}/ssl")
+async def issue_ssl_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    # Backward compatibility endpoint
+    return await manage_site_ssl(site_id, request, action="issue", email=None, user=user)
 
 @router.post("/{site_id}/sync")
 async def sync_vhost_action(site_id: int, request: Request, user: dict = Depends(login_required)):
