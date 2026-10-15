@@ -9,9 +9,14 @@
         <h2 style="font-size: 18px; font-weight: 600;">Hosted Websites</h2>
         <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Manage domain mapping, virtual hosts, Git repositories, and TLS certificates</p>
     </div>
-    <button onclick="openModal('addSiteModal')" class="btn btn-primary">
-        <span>+</span> Add Website
-    </button>
+    <div style="display: flex; gap: 10px; align-items: center;">
+        <button type="button" onclick="openDomainGuideModal()" class="btn btn-secondary" style="gap: 6px;" title="View DNS setup instructions & test live domain connection">
+            <span>🧭</span> DNS Setup & Checker
+        </button>
+        <button onclick="openModal('addSiteModal')" class="btn btn-primary">
+            <span>+</span> Add Website
+        </button>
+    </div>
 </div>
 
 <!-- Websites Table -->
@@ -32,10 +37,15 @@
                 <tr>
                     <td>
                         <div style="display: flex; flex-direction: column; gap: 4px;">
-                            <a href="http://{{ site.domain }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
-                                {{ site.domain }}
-                                <span style="font-size: 10px;">↗</span>
-                            </a>
+                            <div style="display: flex; align-items: center; gap: 8px;">
+                                <a href="http://{{ site.domain }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                                    {{ site.domain }}
+                                    <span style="font-size: 10px;">↗</span>
+                                </a>
+                                <button type="button" onclick="openDomainGuideModal('{{ site.domain }}')" class="badge badge-gray" style="border: 1px solid var(--border); cursor: pointer; font-size: 10px; padding: 1px 6px; text-decoration: none;" title="Check if {{ site.domain }} is pointing to this VPS server">
+                                    🔍 Check DNS
+                                </button>
+                            </div>
                             <div style="display: flex; flex-wrap: wrap; gap: 4px; align-items: center;">
                                 {% if site.redirect_url %}
                                 <span class="badge" style="background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); font-size: 11px;" title="Redirects to {{ site.redirect_url }}">↗️ {{ site.redirect_type or 301 }} Redirect</span>
@@ -137,9 +147,12 @@
 
         <form id="addWebsiteForm" method="POST" action="/websites/create">
             <div style="margin-bottom: 16px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">Primary Domain</label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <label style="font-size: 13px; color: var(--text-secondary); font-weight: 500;">Primary Domain</label>
+                    <a href="javascript:void(0)" onclick="openDomainGuideModal()" style="font-size: 11px; color: #38bdf8; text-decoration: none;">🧭 DNS Setup Guide</a>
+                </div>
                 <input type="text" name="domain" id="addSiteDomain" placeholder="example.com" required>
-                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Point your DNS A-record to this server IP first</span>
+                <span style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">Point your DNS A-record to server IP (<code>{{ server_ip }}</code>)</span>
             </div>
 
             <!-- Project Type Selection -->

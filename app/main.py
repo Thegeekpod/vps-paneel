@@ -79,3 +79,33 @@ async def logout_action():
     response = RedirectResponse(url="/login", status_code=303)
     response.delete_cookie(COOKIE_NAME)
     return response
+
+from app.auth import login_required
+from app.services.dns_service import get_server_public_ip, check_domain_dns
+from fastapi.responses import JSONResponse
+from typing import Optional
+
+@app.get("/api/server-ip")
+async def get_server_ip_api(request: Request, user: dict = Depends(login_required)):
+    ip = get_server_public_ip()
+    return JSONResponse({"success": True, "server_ip": ip})
+
+@app.post("/api/check-domain")
+async def check_domain_api(
+    request: Request,
+    domain: Optional[str] = Form(None),
+    user: dict = Depends(login_required)
+):
+    target = domain
+    if not target:
+        try:
+            body = await request.json()
+            target = body.get("domain")
+        except Exception:
+            pass
+
+    if not target or not target.strip():
+        return JSONResponse({"success": False, "error": "Domain name is required"}, status_code=400)
+
+    result = check_domain_dns(target.strip())
+    return JSONResponse(result)
