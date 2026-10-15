@@ -114,7 +114,6 @@
                     <th>Password</th>
                     <th>Size</th>
                     <th>Host</th>
-                    <th>Charset</th>
                     <th>Note</th>
                     <th style="text-align: right;">Actions</th>
                 </tr>
@@ -123,8 +122,7 @@
                 {% for db in databases %}
                 <tr>
                     <td>
-                        <strong style="color: var(--accent); font-family: monospace; font-size: 14px;">{{ db.db_name
-                            }}</strong>
+                        <strong style="color: var(--accent); font-family: monospace; font-size: 14px;">{{ db.db_name }}</strong>
                     </td>
                     <td>
                         <code style="color: #fff;">{{ db.db_user }}</code>
@@ -142,10 +140,9 @@
                     </td>
                     <td><span class="badge badge-info">{{ db.size }}</span></td>
                     <td><code>{{ db.db_host }}</code></td>
-                    <td><span class="badge badge-gray">{{ db.charset }}</span></td>
                     <td style="color: var(--text-muted); font-size: 12px;">{{ db.note or '-' }}</td>
                     <td style="text-align: right;">
-                        <div style="display: inline-flex; gap: 6px; align-items: center;">
+                        <div style="display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end;">
                             {% if pma_installed %}
                             <form method="POST" action="{{ pma_url }}/signon.php" target="_blank" style="display: inline; margin: 0; padding: 0;">
                                 <input type="hidden" name="user" value="{{ db.db_user }}">
@@ -153,28 +150,28 @@
                                 <input type="hidden" name="host" value="127.0.0.1">
                                 <input type="hidden" name="port" value="3306">
                                 <input type="hidden" name="db" value="{{ db.db_name }}">
-                                <button type="submit" class="btn btn-secondary"
-                                    style="padding: 4px 8px; font-size: 11px; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; cursor: pointer;"
+                                <button type="submit" class="btn btn-secondary btn-icon"
+                                    style="border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; cursor: pointer;"
                                     title="Auto-login to '{{ db.db_name }}' in phpMyAdmin (:888)">
-                                    ⚡ phpMyAdmin
+                                    ⚡
                                 </button>
                             </form>
                             {% endif %}
-                            <button onclick="backupDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary"
-                                style="padding: 4px 8px; font-size: 11px;" title="Create Backup">
-                                💾 Backup
+                            <button onclick="backupDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary btn-icon"
+                                title="Create Backup ({{ db.db_name }})">
+                                💾
                             </button>
-                            <button onclick="openImportModal({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary"
-                                style="padding: 4px 8px; font-size: 11px;" title="Import SQL File">
-                                ⬆️ Import
+                            <button onclick="openImportModal({{ db.id }}, '{{ db.db_name }}')" class="btn btn-secondary btn-icon"
+                                title="Import SQL File into {{ db.db_name }}">
+                                ⬆️
                             </button>
                             <button onclick="openChangePassModal({{ db.id }}, '{{ db.db_user }}')"
-                                class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;"
-                                title="Change Password">
+                                class="btn btn-secondary btn-icon"
+                                title="Change Password for user {{ db.db_user }}">
                                 🔑
                             </button>
-                            <button onclick="deleteDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-danger"
-                                style="padding: 4px 8px; font-size: 11px;" title="Delete Database">
+                            <button onclick="deleteDatabase({{ db.id }}, '{{ db.db_name }}')" class="btn btn-danger btn-icon"
+                                title="Delete Database '{{ db.db_name }}'">
                                 🗑️
                             </button>
                         </div>
@@ -182,7 +179,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="8" style="text-align: center; color: var(--text-muted); padding: 40px;">
+                    <td colspan="7" style="text-align: center; color: var(--text-muted); padding: 40px;">
                         <div style="font-size: 32px; margin-bottom: 8px;">🗄️</div>
                         <div>No databases created yet.</div>
                         <div style="font-size: 12px; margin-top: 6px;">Click <strong>+ Add Database</strong> to create a
