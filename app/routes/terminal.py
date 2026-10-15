@@ -17,13 +17,14 @@ from app.templates_util import render
 router = APIRouter(prefix="/terminal")
 
 @router.get("", response_class=HTMLResponse)
-async def terminal_view(request: Request, user: dict = Depends(login_required)):
+async def terminal_view(request: Request, dir: Optional[str] = None, user: dict = Depends(login_required)):
     server_ip = request.headers.get("host", "").split(":")[0] or "97.74.84.87"
     token = request.cookies.get(COOKIE_NAME) or ""
     return render("terminal.html", {
         "user": user,
         "server_ip": server_ip,
         "token": token,
+        "initial_dir": dir or "",
         "active_nav": "terminal"
     }, request)
 
@@ -43,6 +44,9 @@ async def terminal_ws_endpoint(websocket: WebSocket):
 
     await websocket.accept()
 
+    # Target working directory if requested
+    q_dir = websocket.query_params.get("dir") or websocket.query_params.get("path")
+
     # Create real pseudoterminal (PTY)
     try:
         master_fd, slave_fd = pty.openpty()
@@ -52,12 +56,19 @@ async def terminal_ws_endpoint(websocket: WebSocket):
         return
 
     home_dir = "/root" if os.path.exists("/root") else str(Path.home())
+    target_cwd = home_dir
+    if q_dir:
+        resolved = Path(q_dir).resolve()
+        if resolved.exists() and resolved.is_dir():
+            target_cwd = str(resolved)
+
     shell = "/bin/bash" if os.path.exists("/bin/bash") else (os.environ.get("SHELL") or "/bin/sh")
 
     env = dict(os.environ)
     env["TERM"] = "xterm-256color"
     env["COLORTERM"] = "truecolor"
     env["HOME"] = home_dir
+    env["PWD"] = target_cwd
     env["USER"] = "root" if (hasattr(os, "getuid") and os.getuid() == 0) else os.environ.get("USER", "root")
     env["LC_ALL"] = "C.UTF-8"
     env["LANG"] = "C.UTF-8"
@@ -69,7 +80,7 @@ async def terminal_ws_endpoint(websocket: WebSocket):
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
-            cwd=home_dir,
+            cwd=target_cwd,
             env=env
         )
     except Exception as e:
@@ -80,6 +91,14 @@ async def terminal_ws_endpoint(websocket: WebSocket):
         return
 
     os.close(slave_fd)
+
+    # If a specific directory was requested, navigate to it in shell prompt
+    if target_cwd != home_dir:
+        try:
+            # Short sleep or write after shell spawns
+            os.write(master_fd, f"cd '{target_cwd}' && clear\n".encode("utf-8"))
+        except Exception:
+            pass
 
     try:
         initial_winsize = struct.pack("HHHH", 28, 110, 0, 0)

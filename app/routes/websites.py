@@ -39,6 +39,7 @@ async def list_websites(
 async def create_website_action(
     request: Request,
     domain: str = Form(...),
+    root_dir: Optional[str] = Form(None),
     php_version: str = Form("8.3"),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
@@ -48,7 +49,10 @@ async def create_website_action(
     if not domain or " " in domain:
         return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Invalid domain name provided')}", status_code=303)
 
-    site_root = WEB_ROOT / domain
+    if root_dir and root_dir.strip():
+        site_root = Path(root_dir.strip())
+    else:
+        site_root = WEB_ROOT / domain
     site_root.mkdir(parents=True, exist_ok=True)
     
     clean_git_repo = git_repo.strip() if git_repo else ""
@@ -213,3 +217,64 @@ async def pull_website_git(site_id: int, request: Request, user: dict = Depends(
 
     log_action(user["username"], "GitPull", f"Domain: {site['domain']}, Result: {msg}", request.client.host)
     return JSONResponse({"success": success, "message": msg})
+
+@router.post("/{site_id}/settings")
+async def update_website_settings(
+    site_id: int,
+    request: Request,
+    root_dir: str = Form(...),
+    php_version: str = Form("8.3"),
+    git_repo: Optional[str] = Form(None),
+    git_branch: Optional[str] = Form(None),
+    user: dict = Depends(login_required)
+):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    if not site:
+        conn.close()
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Website not found')}", status_code=303)
+
+    domain = site["domain"]
+    clean_root_dir = root_dir.strip()
+    if not clean_root_dir:
+        conn.close()
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote('Root directory cannot be empty')}", status_code=303)
+
+    new_root = Path(clean_root_dir)
+    try:
+        new_root.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        conn.close()
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Failed to create root directory: {e}')}", status_code=303)
+
+    clean_git_repo = git_repo.strip() if git_repo else ""
+    clean_git_branch = git_branch.strip() if git_branch else ""
+
+    # Reconfigure Nginx vhost with new root_dir and php_version
+    vhost_success, vhost_msg = create_vhost(domain, str(new_root), php_version)
+    if not vhost_success:
+        conn.close()
+        return RedirectResponse(url=f"/websites?error={urllib.parse.quote(f'Nginx configuration failed: {vhost_msg}')}", status_code=303)
+
+    # Set file ownership for web server
+    try:
+        shutil.chown(str(new_root), user="www-data", group="www-data")
+        for p in new_root.glob("**/*"):
+            try:
+                shutil.chown(str(p), user="www-data", group="www-data")
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    cursor.execute(
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, site_id)
+    )
+    conn.commit()
+    conn.close()
+
+    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Root: {new_root}, PHP: {php_version}", request.client.host)
+    return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain}')}", status_code=303)

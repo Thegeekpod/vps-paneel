@@ -315,7 +315,17 @@ function connectWebSocket() {
     
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
     const host = location.host;
-    const wsUrl = `${protocol}//${host}/terminal/ws?token=${encodeURIComponent(token)}`;
+    const urlParams = new URLSearchParams(window.location.search);
+    const targetDir = urlParams.get('dir') || urlParams.get('path') || "{{ initial_dir }}";
+
+    let wsUrl = `${protocol}//${host}/terminal/ws?token=${encodeURIComponent(token)}`;
+    if (targetDir) {
+        wsUrl += `&dir=${encodeURIComponent(targetDir)}`;
+        const titleEl = document.querySelector(".term-title");
+        if (titleEl) {
+            titleEl.innerHTML = `<span>💻</span> root@${serverIp}: <span style="color:#38bdf8; font-weight: normal;">${targetDir}</span>`;
+        }
+    }
 
     if (socket) {
         try { socket.close(); } catch (e) {}
