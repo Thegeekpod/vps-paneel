@@ -118,6 +118,74 @@
 
                     <!-- DNS Test Feedback Box -->
                     <div id="dnsResultBox" style="display: none; margin-top: 10px; padding: 12px; border-radius: 8px; font-size: 12px; line-height: 1.5;"></div>
+
+                    <!-- DNS Subdomain Record Instructions Guide -->
+                    <div style="margin-top: 14px; background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; overflow: hidden;">
+                        <button type="button" onclick="toggleDnsGuide()" style="width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: transparent; border: none; color: #38bdf8; font-size: 13px; font-weight: 600; cursor: pointer; text-align: left;">
+                            <span style="display: inline-flex; align-items: center; gap: 8px;">
+                                <span>📖</span> How to add this DNS Record at your domain registrar?
+                            </span>
+                            <span id="dnsGuideChevron" style="font-size: 11px; transition: transform 0.2s;">▼</span>
+                        </button>
+
+                        <div id="dnsGuideContent" style="display: none; padding: 0 14px 14px 14px; border-top: 1px dashed rgba(56, 189, 248, 0.2);">
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-top: 10px; margin-bottom: 10px; line-height: 1.5;">
+                                To point a subdomain like <code style="color: #38bdf8;">panel.yourdomain.com</code> to this server, log in to your domain DNS provider (Cloudflare, Namecheap, GoDaddy, etc.) and add this <strong>A Record</strong>:
+                            </p>
+
+                            <!-- DNS Record Table -->
+                            <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border); border-radius: 6px; overflow: hidden; margin-bottom: 12px;">
+                                <table style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                                    <thead>
+                                        <tr style="background: rgba(255,255,255,0.03); border-bottom: 1px solid var(--border);">
+                                            <th style="padding: 6px 10px; text-align: left; color: var(--text-muted); font-size: 11px;">Type</th>
+                                            <th style="padding: 6px 10px; text-align: left; color: var(--text-muted); font-size: 11px;">Name / Host</th>
+                                            <th style="padding: 6px 10px; text-align: left; color: var(--text-muted); font-size: 11px;">Points to / IPv4</th>
+                                            <th style="padding: 6px 10px; text-align: left; color: var(--text-muted); font-size: 11px;">TTL</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr>
+                                            <td style="padding: 8px 10px;"><span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 700;">A</span></td>
+                                            <td style="padding: 8px 10px;"><code style="color: #f8fafc; font-weight: 600;">panel</code> <span style="font-size: 10px; color: var(--text-muted);">(prefix only)</span></td>
+                                            <td style="padding: 8px 10px;">
+                                                <div style="display: inline-flex; align-items: center; gap: 6px;">
+                                                    <code style="color: #34d399; font-weight: 700;">{{ ssl_status.server_ip }}</code>
+                                                    <button type="button" onclick="navigator.clipboard.writeText('{{ ssl_status.server_ip }}'); alert('IP copied to clipboard!');" class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px;" title="Copy IP">📋</button>
+                                                </div>
+                                            </td>
+                                            <td style="padding: 8px 10px; color: var(--text-muted);">Auto / 300</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Provider Quick Steps -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 11px; color: var(--text-secondary); line-height: 1.5;">
+                                <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);">
+                                    <strong style="color: #f8fafc;">☁️ Cloudflare:</strong><br>
+                                    Add A-Record &rarr; Name: <code>panel</code> &rarr; IPv4: <code>{{ ssl_status.server_ip }}</code>.<br>
+                                    <em style="color: #fbbf24;">* Set Proxy to <strong>DNS Only (Grey Cloud)</strong> for initial SSL validation.</em>
+                                </div>
+                                <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);">
+                                    <strong style="color: #f8fafc;">🏷️ Namecheap:</strong><br>
+                                    Domain List &rarr; Manage &rarr; Advanced DNS &rarr; Add Record: <code>A Record</code> &rarr; Host: <code>panel</code> &rarr; Value: <code>{{ ssl_status.server_ip }}</code>.
+                                </div>
+                                <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);">
+                                    <strong style="color: #f8fafc;">🌐 GoDaddy:</strong><br>
+                                    DNS &rarr; Add Record &rarr; Type: <code>A</code> &rarr; Name: <code>panel</code> &rarr; Value: <code>{{ ssl_status.server_ip }}</code> &rarr; TTL: <code>1/2 Hour</code>.
+                                </div>
+                                <div style="background: rgba(255,255,255,0.02); padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border);">
+                                    <strong style="color: #f8fafc;">🚀 Hostinger / cPanel:</strong><br>
+                                    DNS Zone &rarr; Add Record &rarr; Type: <code>A</code> &rarr; Name: <code>panel</code> &rarr; Points to: <code>{{ ssl_status.server_ip }}</code>.
+                                </div>
+                            </div>
+
+                            <div style="margin-top: 10px; font-size: 11px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+                                <span>💡</span> Once saved at your registrar, click <strong>🔍 Test DNS</strong> above. Once verified, click <strong>🔒 Issue Let's Encrypt SSL</strong> below!
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <!-- 2. Active Certificate Details -->
@@ -276,6 +344,18 @@
 
 <!-- Interactive JS Logic -->
 <script>
+function toggleDnsGuide() {
+    const content = document.getElementById('dnsGuideContent');
+    const chevron = document.getElementById('dnsGuideChevron');
+    if (content.style.display === 'none' || !content.style.display) {
+        content.style.display = 'block';
+        if (chevron) chevron.style.transform = 'rotate(180deg)';
+    } else {
+        content.style.display = 'none';
+        if (chevron) chevron.style.transform = 'rotate(0deg)';
+    }
+}
+
 async function testPanelDns() {
     const domain = document.getElementById('panelDomainInput').value.trim();
     const box = document.getElementById('dnsResultBox');
