@@ -9,12 +9,22 @@ from typing import Optional, Tuple
 from fastapi import APIRouter, Request, Depends, Form, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
 from app.auth import login_required
-from app.config import WEB_ROOT
+from app.config import WEB_ROOT, NGINX_AVAILABLE
 from app.database import get_db, log_action
 from app.services.nginx_service import create_vhost, delete_vhost, test_and_reload_nginx, restore_ssl_for_existing_domains
 from app.services.ssl_service import issue_ssl, remove_ssl, get_ssl_info, inject_ssl_into_vhost, toggle_force_https, diagnose_domain_ssl, get_certbot_log
 from app.services.git_service import clone_repository, pull_repository
 from app.services.database_service import create_db_and_user, drop_db_and_user
+from app.services.node_service import (
+    get_next_available_node_port,
+    start_node_app,
+    stop_node_app,
+    restart_node_app,
+    get_node_app_status,
+    build_node_app,
+    get_node_logs,
+    get_node_environment
+)
 from app.templates_util import render
 
 router = APIRouter(prefix="/websites")
@@ -35,14 +45,42 @@ async def list_websites(
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM websites ORDER BY id DESC")
     websites = [dict(row) for row in cursor.fetchall()]
+
+    db_updated = False
+    for site in websites:
+        domain = site.get("domain", "")
+        fullchain = Path(f"/etc/letsencrypt/live/{domain}/fullchain.pem")
+        vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
+        has_ssl = False
+        if fullchain.exists() and vhost_file.exists():
+            try:
+                conf_text = vhost_file.read_text()
+                if "ssl_certificate" in conf_text and ("443 ssl" in conf_text or "listen 443" in conf_text):
+                    has_ssl = True
+            except Exception:
+                pass
+
+        real_ssl_enabled = 1 if has_ssl else 0
+        if site.get("ssl_enabled") != real_ssl_enabled:
+            site["ssl_enabled"] = real_ssl_enabled
+            cursor.execute("UPDATE websites SET ssl_enabled = ? WHERE id = ?", (real_ssl_enabled, site["id"]))
+            db_updated = True
+
+    if db_updated:
+        conn.commit()
     conn.close()
+
+    next_node_port = get_next_available_node_port()
+    node_env = get_node_environment()
 
     return render("websites.html", {
         "user": user,
         "websites": websites,
         "active_nav": "websites",
         "error": error,
-        "success": success
+        "success": success,
+        "next_node_port": next_node_port,
+        "node_env": node_env
     }, request)
 
 def setup_laravel_environment(
@@ -157,6 +195,8 @@ async def create_website_action(
     root_dir: Optional[str] = Form(None),
     php_version: str = Form("8.3"),
     project_type: str = Form("php"),
+    node_port: Optional[int] = Form(None),
+    node_script: Optional[str] = Form(None),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
     create_db: Optional[str] = Form(None),
@@ -169,7 +209,7 @@ async def create_website_action(
     try:
         domain = domain.strip().lower()
         project_type = project_type.strip().lower() if project_type else "php"
-        if project_type not in ["laravel", "php", "static"]:
+        if project_type not in ["laravel", "php", "static", "nextjs", "nodejs"]:
             project_type = "php"
 
         if not domain or " " in domain:
@@ -315,19 +355,106 @@ async def create_website_action(
             else:
                 log_action(user["username"], "CreateDatabaseFailed", f"Domain: {domain}, Error: {db_err}", client_ip)
 
+        # Node.js / Next.js initialization
+        clean_node_port = 3000
+        clean_node_script = "npm start"
+        if project_type in ["nextjs", "nodejs"]:
+            clean_node_port = int(node_port) if node_port and int(node_port) > 0 else get_next_available_node_port()
+            clean_node_script = (node_script or ("npm run start" if project_type == "nextjs" else "node server.js")).strip()
+
+            # If no repo cloned and site_root is empty, create friendly starter template
+            if not clean_git_repo and site_root.exists() and not any(site_root.iterdir()):
+                try:
+                    if project_type == "nextjs":
+                        (site_root / "package.json").write_text(f"""{{
+  "name": "{domain}",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {{
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p {clean_node_port}"
+  }},
+  "dependencies": {{
+    "next": "^14.2.0",
+    "react": "^18",
+    "react-dom": "^18"
+  }}
+}}
+""")
+                        app_dir = site_root / "app"
+                        app_dir.mkdir(parents=True, exist_ok=True)
+                        (app_dir / "page.js").write_text(f"""export default function Home() {{
+  return (
+    <div style={{{{ fontFamily: 'system-ui, sans-serif', padding: '60px 20px', textAlign: 'center', background: '#090d16', color: '#f8fafc', minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}}}>
+      <h1 style={{{{ fontSize: '36px', color: '#38bdf8', marginBottom: '12px' }}}}>▲ Next.js Server Online</h1>
+      <p style={{{{ color: '#94a3b8', fontSize: '18px', marginBottom: '24px' }}}}>Domain: <strong style={{{{ color: '#f8fafc' }}}}>{domain}</strong></p>
+      <div style={{{{ background: '#111827', border: '1px solid #1e293b', padding: '20px 30px', borderRadius: '12px', maxWidth: '500px' }}}}>
+        <p style={{{{ fontSize: '14px', color: '#94a3b8' }}}}>Reverse-proxied via Nginx on internal port <code style={{{{ color: '#34d399' }}}}>:{clean_node_port}</code></p>
+      </div>
+    </div>
+  );
+}}
+""")
+                    else:
+                        (site_root / "package.json").write_text(f"""{{
+  "name": "{domain}",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {{
+    "start": "node server.js"
+  }}
+}}
+""")
+                        (site_root / "server.js").write_text(f"""const http = require('http');
+const port = process.env.PORT || {clean_node_port};
+
+const server = http.createServer((req, res) => {{
+  res.writeHead(200, {{ 'Content-Type': 'text/html; charset=utf-8' }});
+  res.end(`<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Node.js - {domain}</title>
+    <style>
+        body {{ font-family: system-ui, -apple-system, sans-serif; background: #090d16; color: #f8fafc; display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; text-align: center; }}
+        .box {{ background: #111827; border: 1px solid #1e293b; padding: 40px; border-radius: 16px; max-width: 500px; width: 100%; }}
+        h1 {{ color: #4ade80; font-size: 26px; margin-bottom: 12px; }}
+        p {{ color: #94a3b8; font-size: 15px; }}
+        code {{ background: rgba(255,255,255,0.06); padding: 3px 8px; border-radius: 4px; color: #38bdf8; font-size: 14px; }}
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>🟢 Node.js Server Online</h1>
+        <p>Domain: <strong style="color: #f8fafc;">{domain}</strong></p>
+        <p>Listening locally on port <code>:${{port}}</code></p>
+    </div>
+</body>
+</html>`);
+}});
+
+server.listen(port, '127.0.0.1', () => {{
+  console.log(`Server running on http://127.0.0.1:${{port}}`);
+}});
+""")
+                        start_node_app(domain, str(site_root), clean_node_script, clean_node_port)
+                except Exception:
+                    pass
+
         # If Laravel, execute Laravel bootstrapping (permissions, .env, artisan)
         if project_type == "laravel":
             setup_laravel_environment(site_root, db_name=linked_db_name, db_user=clean_user, db_pass=clean_pass, php_version=php_version)
 
         # Create Nginx VirtualHost
-        vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version, project_type)
+        vhost_success, vhost_msg = create_vhost(domain, str(site_root), php_version, project_type, node_port=clean_node_port)
 
         conn = get_db()
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type)
+                "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type, node_port, node_script, node_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type, clean_node_port if project_type in ["nextjs", "nodejs"] else None, clean_node_script if project_type in ["nextjs", "nodejs"] else None, "running" if project_type == "nodejs" and not clean_git_repo else "stopped")
             )
             conn.commit()
         except Exception as e:
@@ -455,7 +582,15 @@ async def get_site_ssl_status(site_id: int, request: Request, user: dict = Depen
         return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
 
     info = get_ssl_info(site["domain"])
-    info["db_ssl_enabled"] = bool(site["ssl_enabled"])
+    real_ssl_active = bool(info.get("is_active"))
+    if bool(site["ssl_enabled"]) != real_ssl_active:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("UPDATE websites SET ssl_enabled = ? WHERE id = ?", (1 if real_ssl_active else 0, site_id))
+        conn.commit()
+        conn.close()
+
+    info["db_ssl_enabled"] = real_ssl_active
     return JSONResponse({"success": True, "data": info})
 
 @router.post("/{site_id}/ssl-manage")
@@ -753,6 +888,8 @@ async def update_website_settings(
     root_dir: str = Form(...),
     php_version: str = Form("8.3"),
     project_type: str = Form("php"),
+    node_port: Optional[int] = Form(None),
+    node_script: Optional[str] = Form(None),
     redirect_url: Optional[str] = Form(None),
     redirect_type: int = Form(301),
     git_repo: Optional[str] = Form(None),
@@ -771,7 +908,7 @@ async def update_website_settings(
 
     domain = site["domain"]
     project_type = project_type.strip().lower() if project_type else "php"
-    if project_type not in ["laravel", "php", "static"]:
+    if project_type not in ["laravel", "php", "static", "nextjs", "nodejs"]:
         project_type = "php"
 
     clean_root_dir = root_dir.strip()
@@ -797,6 +934,17 @@ async def update_website_settings(
         current_status = "disabled" if status in ["disabled", "deactivated"] else status
     is_maintenance = (current_status == "maintenance")
 
+    # Node configuration
+    clean_node_port = site["node_port"] if "node_port" in site_keys and site["node_port"] else 3000
+    if node_port and int(node_port) > 0:
+        clean_node_port = int(node_port)
+    elif project_type in ["nextjs", "nodejs"] and not clean_node_port:
+        clean_node_port = get_next_available_node_port()
+
+    clean_node_script = site["node_script"] if "node_script" in site_keys and site["node_script"] else "npm start"
+    if node_script and node_script.strip():
+        clean_node_script = node_script.strip()
+
     # Reconfigure Nginx vhost with new settings
     vhost_success, vhost_msg = create_vhost(
         domain,
@@ -806,7 +954,8 @@ async def update_website_settings(
         redirect_url=clean_redirect_url,
         redirect_type=redirect_type,
         is_maintenance=is_maintenance,
-        status=current_status
+        status=current_status,
+        node_port=clean_node_port
     )
     if not vhost_success:
         conn.close()
@@ -827,14 +976,101 @@ async def update_website_settings(
         setup_laravel_environment(new_root, clean_db_name, php_version=php_version)
 
     cursor.execute(
-        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ?, status = ?, is_maintenance = ? WHERE id = ?",
-        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, current_status, 1 if is_maintenance else 0, site_id)
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ?, status = ?, is_maintenance = ?, node_port = ?, node_script = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, current_status, 1 if is_maintenance else 0, clean_node_port, clean_node_script, site_id)
     )
     conn.commit()
     conn.close()
 
     log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, Redirect: {clean_redirect_url}", get_client_ip(request))
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain}')}", status_code=303)
+
+@router.post("/{site_id}/node/start")
+async def node_start_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    port = site["node_port"] or 3000
+    script = site["node_script"] or "npm start"
+    ok, msg = start_node_app(site["domain"], site["root_dir"], script=script, port=port)
+    log_action(user["username"], "StartNodeApp", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
+    return JSONResponse({"success": ok, "message": msg, "error": None if ok else msg})
+
+@router.post("/{site_id}/node/stop")
+async def node_stop_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    ok, msg = stop_node_app(site["domain"], site["root_dir"])
+    log_action(user["username"], "StopNodeApp", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
+    return JSONResponse({"success": ok, "message": msg, "error": None if ok else msg})
+
+@router.post("/{site_id}/node/restart")
+async def node_restart_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    port = site["node_port"] or 3000
+    script = site["node_script"] or "npm start"
+    ok, msg = restart_node_app(site["domain"], site["root_dir"], script=script, port=port)
+    log_action(user["username"], "RestartNodeApp", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
+    return JSONResponse({"success": ok, "message": msg, "error": None if ok else msg})
+
+@router.post("/{site_id}/node/build")
+async def node_build_action(site_id: int, request: Request, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    ok, msg = build_node_app(site["root_dir"])
+    log_action(user["username"], "BuildNodeApp", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
+    return JSONResponse({"success": ok, "message": msg, "error": None if ok else msg})
+
+@router.get("/{site_id}/node/logs")
+async def node_logs_action(site_id: int, lines: int = 80, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    logs = get_node_logs(site["domain"], site["root_dir"], lines=lines)
+    return JSONResponse({"success": True, "domain": site["domain"], "logs": logs})
+
+@router.get("/{site_id}/node/status")
+async def node_status_action(site_id: int, user: dict = Depends(login_required)):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM websites WHERE id = ?", (site_id,))
+    site = cursor.fetchone()
+    conn.close()
+    if not site:
+        return JSONResponse({"success": False, "error": "Website not found"}, status_code=404)
+
+    port = site["node_port"] or 3000
+    status = get_node_app_status(site["domain"], port=port)
+    return JSONResponse({"success": True, "status": status})
 
 @router.post("/{site_id}/fix-laravel")
 async def fix_laravel_action(site_id: int, request: Request, user: dict = Depends(login_required)):

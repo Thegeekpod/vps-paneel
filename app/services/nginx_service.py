@@ -142,6 +142,15 @@ def restore_ssl_for_existing_domains() -> bool:
                                 modified = True
                         except Exception:
                             pass
+                    try:
+                        from app.database import get_db
+                        conn = get_db()
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE websites SET ssl_enabled = 1 WHERE domain = ?", (domain,))
+                        conn.commit()
+                        conn.close()
+                    except Exception:
+                        pass
         if modified:
             test_and_reload_nginx()
     except Exception:
@@ -339,7 +348,8 @@ def create_vhost(
     redirect_url: str = None,
     redirect_type: int = 301,
     is_maintenance: bool = False,
-    status: str = "active"
+    status: str = "active",
+    node_port: int = 3000
 ) -> Tuple[bool, str]:
     vhost_file = NGINX_AVAILABLE / f"{domain}.conf"
     vhost_enabled = NGINX_ENABLED / f"{domain}.conf"
@@ -418,6 +428,75 @@ def create_vhost(
 
     location ~ /\\.ht {{
         deny all;
+    }}
+}}
+"""
+    elif project_type == "nextjs":
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Next.js static files optimization
+    location /_next/static/ {{
+        alias {clean_root}/.next/static/;
+        expires 365d;
+        access_log off;
+    }}
+
+    location /public/ {{
+        alias {clean_root}/public/;
+        expires 30d;
+        access_log off;
+    }}
+
+    location / {{
+        proxy_pass http://127.0.0.1:{node_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
+    }}
+}}
+"""
+    elif project_type == "nodejs":
+        config = f"""server {{
+    listen 80;
+    listen [::]:80;
+    server_name {domain} www.{domain};
+
+    access_log /var/log/nginx/{domain}-access.log;
+    error_log /var/log/nginx/{domain}-error.log error;
+
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    location / {{
+        proxy_pass http://127.0.0.1:{node_port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 300s;
+        proxy_connect_timeout 75s;
     }}
 }}
 """

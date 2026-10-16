@@ -39,6 +39,17 @@ if ! command -v mysql &> /dev/null && ! command -v mariadb &> /dev/null; then
     systemctl enable mariadb 2>/dev/null || true
     systemctl start mariadb 2>/dev/null || true
 fi
+
+if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+    echo "[-] Installing Node.js & NPM for Next.js / Node.js support..."
+    apt-get update -y >/dev/null 2>&1 || true
+    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm >/dev/null 2>&1 || true
+fi
+
+if command -v npm &> /dev/null && ! command -v pm2 &> /dev/null; then
+    echo "[-] Installing PM2 globally..."
+    npm install -g pm2 >/dev/null 2>&1 || true
+fi
 mkdir -p /www/backup/database
 
 # Remove old Adminer if present (preserve official phpMyAdmin if installed)

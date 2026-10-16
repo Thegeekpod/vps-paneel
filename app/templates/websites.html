@@ -63,6 +63,10 @@
                                 {% endif %}
                                 {% if site.project_type == 'laravel' %}
                                 <span class="badge" style="background: rgba(244, 63, 94, 0.15); color: #fb7185; border: 1px solid rgba(244, 63, 94, 0.3); font-size: 11px;">🚀 Laravel</span>
+                                {% elif site.project_type == 'nextjs' %}
+                                <span class="badge" style="background: rgba(255, 255, 255, 0.15); color: #f8fafc; border: 1px solid rgba(255, 255, 255, 0.3); font-size: 11px;">▲ Next.js</span>
+                                {% elif site.project_type == 'nodejs' %}
+                                <span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3); font-size: 11px;">🟢 Node.js</span>
                                 {% elif site.project_type == 'static' %}
                                 <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 11px;">⚡ Static</span>
                                 {% else %}
@@ -71,7 +75,13 @@
                             </div>
                         </div>
                     </td>
-                    <td><span class="badge badge-gray">PHP {{ site.php_version }}</span></td>
+                    <td>
+                        {% if site.project_type in ['nextjs', 'nodejs'] %}
+                        <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-family: monospace;">Port :{{ site.node_port or 3000 }}</span>
+                        {% else %}
+                        <span class="badge badge-gray">PHP {{ site.php_version }}</span>
+                        {% endif %}
+                    </td>
                     <td>
                         {% set curr_status = 'maintenance' if (site.is_maintenance or site.status == 'maintenance') else ('disabled' if site.status in ['disabled', 'deactivated'] else ('failed' if site.status == 'failed' else 'active')) %}
                         <button type="button" 
@@ -94,7 +104,7 @@
                         </button>
                     </td>
                     <td>
-                        <button type="button" onclick="openSslModal({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}')" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; {% if site.ssl_enabled %}color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.08);{% else %}color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.08);{% endif %}" title="Open SSL Certificate Manager">
+                        <button type="button" id="ssl-btn-{{ site.id }}" onclick="openSslModal({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}')" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; {% if site.ssl_enabled %}color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.08);{% else %}color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.08);{% endif %}" title="Open SSL Certificate Manager">
                             {% if site.ssl_enabled %}
                             <span>🔒</span> SSL Active
                             {% else %}
@@ -104,13 +114,18 @@
                     </td>
                     <td style="text-align: right;">
                         <div style="display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end;">
+                            {% if site.project_type in ['nextjs', 'nodejs'] %}
+                            <button type="button" onclick="openNodeManager({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.project_type }}', {{ site.node_port or 3000 }}, '{{ site.node_script or 'npm start' }}')" class="btn btn-secondary btn-icon" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" title="Manage Node.js / Next.js Process (Start, Stop, Build, PM2 Logs)">
+                                {% if site.project_type == 'nextjs' %}▲{% else %}🟢{% endif %}
+                            </button>
+                            {% endif %}
                             <a href="/file-manager?site_id={{ site.id }}" class="btn btn-secondary btn-icon" title="File Manager">
                                 📁
                             </a>
                             <a href="/terminal?dir={{ site.root_dir }}" class="btn btn-secondary btn-icon" title="Open Terminal in Website Root ({{ site.root_dir }})" target="_blank">
                                 💻
                             </a>
-                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }}, '{{ curr_status }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
+                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }}, '{{ curr_status }}', {{ site.node_port or 3000 }}, '{{ site.node_script or 'npm start' }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
                                 ⚙️
                             </button>
                             {% if site.git_repo %}
@@ -161,12 +176,37 @@
                     Project Type / Framework
                 </label>
                 <select name="project_type" id="addProjectType" onchange="onAddProjectTypeChange()">
+                    <option value="nextjs">▲ Next.js Application (SSR, Static export, PM2)</option>
+                    <option value="nodejs">🟢 Node.js / Express Application (API, Script, PM2)</option>
                     <option value="laravel" selected>🚀 Laravel Framework (Auto /public root, permissions & .env)</option>
                     <option value="php">🐘 Standard PHP (WordPress, Custom PHP, CMS)</option>
                     <option value="static">⚡ Static HTML / JS (React, Vue dist, Plain HTML)</option>
                 </select>
                 <span id="addProjectTypeHelp" style="font-size: 11px; color: #38bdf8; margin-top: 4px; display: block;">
                     ✨ Auto-routes Nginx document root to <code>.../public</code>, sets 775 storage permissions, and configures .env.
+                </span>
+            </div>
+
+            <!-- Node.js & Next.js Dedicated Runtime Config -->
+            <div id="addNodeConfigContainer" style="display: none; background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                <div style="font-size: 12px; font-weight: 700; color: #38bdf8; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="display: inline-flex; align-items: center; gap: 6px;">
+                        <span>⚙️</span> Node.js / Next.js Runtime Configuration
+                    </span>
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px;">PM2 Managed</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                    <div>
+                        <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">App Port (Local)</label>
+                        <input type="number" name="node_port" id="addNodePort" value="{{ next_node_port or 3000 }}" min="1000" max="65535" style="width: 100%; font-family: monospace;">
+                    </div>
+                    <div>
+                        <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">Start Command / Script</label>
+                        <input type="text" name="node_script" id="addNodeScript" value="npm run start" placeholder="npm start or node server.js" style="width: 100%; font-family: monospace;">
+                    </div>
+                </div>
+                <span style="font-size: 11px; color: var(--text-muted); display: block; line-height: 1.4;">
+                    Nginx reverse proxies requests from your domain to <code>http://127.0.0.1:[Port]</code> with full WebSocket and SSL support.
                 </span>
             </div>
 
@@ -182,7 +222,7 @@
                 </span>
             </div>
 
-            <div style="margin-bottom: 18px;">
+            <div id="addPhpVersionContainer" style="margin-bottom: 18px;">
                 <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
                 <select name="php_version" id="addPhpVersion">
                     <option value="8.3" selected>PHP 8.3 FPM (Recommended)</option>
@@ -300,12 +340,37 @@
                         Project Type / Framework
                     </label>
                     <select name="project_type" id="settingsProjectType" onchange="onSettingsProjectTypeChange()">
+                        <option value="nextjs">▲ Next.js Application (SSR, Reverse Proxy, PM2)</option>
+                        <option value="nodejs">🟢 Node.js / Express Application (API, Script, PM2)</option>
                         <option value="laravel">🚀 Laravel Framework (Auto /public root, permissions & .env)</option>
                         <option value="php">🐘 Standard PHP (WordPress, Custom PHP, CMS)</option>
                         <option value="static">⚡ Static HTML / JS (No PHP)</option>
                     </select>
                     <span id="settingsProjectTypeHelp" style="font-size: 11px; color: var(--text-muted); margin-top: 4px; display: block;">
                         Selecting <b>Laravel</b> routes web traffic to <code>.../public</code> and handles try_files rewriting.
+                    </span>
+                </div>
+
+                <!-- Node.js & Next.js Dedicated Settings Container -->
+                <div id="settingsNodeConfigContainer" style="display: none; background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+                    <div style="font-size: 12px; font-weight: 700; color: #38bdf8; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+                        <span style="display: inline-flex; align-items: center; gap: 6px;">
+                            <span>⚙️</span> Node.js / Next.js Runtime Settings
+                        </span>
+                        <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px;">PM2 Managed</span>
+                    </div>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                        <div>
+                            <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">Internal Port</label>
+                            <input type="number" name="node_port" id="settingsNodePort" value="3000" min="1000" max="65535" style="width: 100%; font-family: monospace;">
+                        </div>
+                        <div>
+                            <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">Start Command / Script</label>
+                            <input type="text" name="node_script" id="settingsNodeScript" value="npm start" placeholder="npm start or node server.js" style="width: 100%; font-family: monospace;">
+                        </div>
+                    </div>
+                    <span style="font-size: 11px; color: var(--text-muted); display: block; line-height: 1.4;">
+                        Nginx reverse proxies traffic for this site to <code>http://127.0.0.1:[Port]</code>.
                     </span>
                 </div>
 
@@ -319,7 +384,7 @@
                     </span>
                 </div>
 
-                <div style="margin-bottom: 16px;">
+                <div id="settingsPhpVersionContainer" style="margin-bottom: 16px;">
                     <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px; font-weight: 500;">PHP Version</label>
                     <select name="php_version" id="settingsPhpVersion">
                         <option value="8.3">PHP 8.3 FPM (Recommended)</option>
@@ -690,6 +755,75 @@
         <span class="item-check" id="statusCheck_disabled" style="display:none;">✓</span>
     </button>
 </div>
+
+<!-- Node.js / Next.js Process Manager Modal -->
+<div id="nodeManagerModal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 660px; max-height: 90vh; overflow-y: auto;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+            <div>
+                <h3 style="font-size: 17px; font-weight: 700; display: flex; align-items: center; gap: 8px;">
+                    <span id="nodeModalIcon">▲</span> <span id="nodeModalDomain">example.com</span>
+                </h3>
+                <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
+                    <span id="nodeModalTypeBadge" class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Next.js Application</span>
+                    <span style="font-size: 12px; color: var(--text-muted);">Root: <code id="nodeModalRoot" style="color: #cbd5e1;">/www/wwwroot/...</code></span>
+                </div>
+            </div>
+            <button type="button" onclick="closeModal('nodeManagerModal')" class="btn btn-secondary" style="padding: 4px 10px;">✕</button>
+        </div>
+
+        <!-- Real-time Status Cards -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px;">
+            <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Runtime State</div>
+                <div id="nodeLiveStatus" style="font-size: 13px; font-weight: 700; color: #34d399; margin-top: 2px;">Checking...</div>
+            </div>
+            <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Internal Port</div>
+                <div id="nodeLivePort" style="font-size: 13px; font-weight: 700; color: #38bdf8; margin-top: 2px;">:3000</div>
+            </div>
+            <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Memory Usage</div>
+                <div id="nodeLiveMemory" style="font-size: 13px; font-weight: 700; color: #f8fafc; margin-top: 2px;">--</div>
+            </div>
+            <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">CPU Usage</div>
+                <div id="nodeLiveCpu" style="font-size: 13px; font-weight: 700; color: #f8fafc; margin-top: 2px;">--</div>
+            </div>
+        </div>
+
+        <!-- Process Controls -->
+        <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;">
+            <button type="button" id="btnNodeStart" onclick="triggerNodeAction('start')" class="btn btn-primary" style="background: #059669; border-color: #10b981; font-size: 12px; padding: 7px 14px; gap: 6px;">
+                <span>▶</span> Start App
+            </button>
+            <button type="button" id="btnNodeRestart" onclick="triggerNodeAction('restart')" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; gap: 6px;">
+                <span>🔄</span> Restart
+            </button>
+            <button type="button" id="btnNodeStop" onclick="triggerNodeAction('stop')" class="btn btn-danger" style="font-size: 12px; padding: 7px 14px; gap: 6px;">
+                <span>⏹</span> Stop
+            </button>
+            <button type="button" id="btnNodeBuild" onclick="triggerNodeBuild()" class="btn btn-secondary" style="font-size: 12px; padding: 7px 14px; gap: 6px; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
+                <span>⚡</span> Run npm run build
+            </button>
+            <button type="button" onclick="loadNodeLogs()" class="btn btn-secondary" style="font-size: 12px; padding: 7px 12px; margin-left: auto;">
+                <span>📋</span> Refresh Logs
+            </button>
+        </div>
+
+        <!-- Build Progress & Output Box -->
+        <div id="nodeBuildOutputBox" style="display: none; margin-bottom: 16px; background: #000; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-family: monospace; font-size: 11px; max-height: 180px; overflow-y: auto; white-space: pre-wrap; color: #34d399;"></div>
+
+        <!-- Logs Box -->
+        <div>
+            <div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+                <span>Process Output & Error Logs (PM2)</span>
+                <span style="font-size: 10px; color: var(--text-muted);">Real-time stream</span>
+            </div>
+            <pre id="nodeLogsContent" style="background: #090d16; border: 1px solid var(--border); border-radius: 8px; padding: 12px; font-size: 11px; line-height: 1.4; color: #cbd5e1; max-height: 240px; overflow-y: auto; white-space: pre-wrap; font-family: monospace;">Loading logs...</pre>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -740,26 +874,50 @@ function onAddProjectTypeChange() {
     const help = document.getElementById("addProjectTypeHelp");
     const rootInput = document.getElementById("addRootDirInput");
     const rootHelp = document.getElementById("addRootDirHelp");
+    const phpContainer = document.getElementById("addPhpVersionContainer");
+    const nodeContainer = document.getElementById("addNodeConfigContainer");
     const phpSelect = document.getElementById("addPhpVersion");
 
-    if (type === "laravel") {
+    if (type === "nextjs") {
+        help.innerHTML = "▲ Production Next.js app with SSR, static optimization, and PM2 process management.";
+        help.style.color = "#38bdf8";
+        rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
+        rootHelp.innerHTML = "Project directory containing <code>package.json</code> and Next.js source code.";
+        if (nodeContainer) nodeContainer.style.display = "block";
+        if (phpContainer) phpContainer.style.display = "none";
+        if (phpSelect) phpSelect.disabled = true;
+    } else if (type === "nodejs") {
+        help.innerHTML = "🟢 Node.js / Express application running on internal port via PM2.";
+        help.style.color = "#4ade80";
+        rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
+        rootHelp.innerHTML = "Project directory containing <code>package.json</code> or your entry script (e.g. <code>server.js</code>).";
+        if (nodeContainer) nodeContainer.style.display = "block";
+        if (phpContainer) phpContainer.style.display = "none";
+        if (phpSelect) phpSelect.disabled = true;
+    } else if (type === "laravel") {
         help.innerHTML = "✨ Auto-routes Nginx document root to <code>.../public</code>, sets 775 storage permissions, and configures .env.";
         help.style.color = "#38bdf8";
         rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
         rootHelp.innerHTML = "Leave empty for default path. Nginx will automatically serve the <code>/public</code> subfolder.";
-        phpSelect.disabled = false;
+        if (nodeContainer) nodeContainer.style.display = "none";
+        if (phpContainer) phpContainer.style.display = "block";
+        if (phpSelect) phpSelect.disabled = false;
     } else if (type === "static") {
         help.innerHTML = "⚡ Pure static HTML/JS site without PHP. Fast static file delivery via Nginx.";
         help.style.color = "#cbd5e1";
         rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
         rootHelp.innerHTML = "Points directly to HTML files or build output directory (e.g. <code>dist</code> or <code>build</code>).";
-        phpSelect.disabled = true;
+        if (nodeContainer) nodeContainer.style.display = "none";
+        if (phpContainer) phpContainer.style.display = "none";
+        if (phpSelect) phpSelect.disabled = true;
     } else {
         help.innerHTML = "🐘 Standard PHP site (WordPress, CodeIgniter, or custom PHP scripts).";
         help.style.color = "var(--text-muted)";
         rootInput.placeholder = "Auto-generated (e.g. /www/wwwroot/example.com)";
         rootHelp.innerHTML = "Web root directory where your <code>index.php</code> is located.";
-        phpSelect.disabled = false;
+        if (nodeContainer) nodeContainer.style.display = "none";
+        if (phpContainer) phpContainer.style.display = "block";
+        if (phpSelect) phpSelect.disabled = false;
     }
 }
 
@@ -767,20 +925,40 @@ function onSettingsProjectTypeChange() {
     const type = document.getElementById("settingsProjectType").value;
     const fixCard = document.getElementById("laravelFixCard");
     const help = document.getElementById("settingsProjectTypeHelp");
+    const phpContainer = document.getElementById("settingsPhpVersionContainer");
+    const nodeContainer = document.getElementById("settingsNodeConfigContainer");
     const phpSelect = document.getElementById("settingsPhpVersion");
 
-    if (type === "laravel") {
+    if (type === "nextjs") {
+        if (fixCard) fixCard.style.display = "none";
+        help.innerHTML = "Next.js preset proxies requests to <code>http://127.0.0.1:[Port]</code> with static asset caching for <code>/_next/static/</code>.";
+        if (nodeContainer) nodeContainer.style.display = "block";
+        if (phpContainer) phpContainer.style.display = "none";
+        if (phpSelect) phpSelect.disabled = true;
+    } else if (type === "nodejs") {
+        if (fixCard) fixCard.style.display = "none";
+        help.innerHTML = "Node.js preset proxies all incoming web traffic to your local application port via PM2.";
+        if (nodeContainer) nodeContainer.style.display = "block";
+        if (phpContainer) phpContainer.style.display = "none";
+        if (phpSelect) phpSelect.disabled = true;
+    } else if (type === "laravel") {
         if (fixCard) fixCard.style.display = "block";
         help.innerHTML = "Laravel preset routes web traffic to <code>.../public</code>, enables FastCGI rewrite rules, and locks down hidden files.";
-        phpSelect.disabled = false;
+        if (nodeContainer) nodeContainer.style.display = "none";
+        if (phpContainer) phpContainer.style.display = "block";
+        if (phpSelect) phpSelect.disabled = false;
     } else if (type === "static") {
         if (fixCard) fixCard.style.display = "none";
         help.innerHTML = "Static preset serves HTML/CSS/JS files directly without PHP-FPM fastcgi processing.";
-        phpSelect.disabled = true;
+        if (nodeContainer) nodeContainer.style.display = "none";
+        if (phpContainer) phpContainer.style.display = "none";
+        if (phpSelect) phpSelect.disabled = true;
     } else {
         if (fixCard) fixCard.style.display = "none";
         help.innerHTML = "Standard PHP preset for WordPress, custom PHP applications, and standard scripts.";
-        phpSelect.disabled = false;
+        if (nodeContainer) nodeContainer.style.display = "none";
+        if (phpContainer) phpContainer.style.display = "block";
+        if (phpSelect) phpSelect.disabled = false;
     }
 }
 
@@ -886,7 +1064,7 @@ async function selectSiteStatus(newStatus) {
     }
 }
 
-function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType, siteStatus) {
+function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType, siteStatus, nodePort, nodeScript) {
     currentSiteSettingsId = id;
     document.getElementById("settingsSiteId").value = id;
     document.getElementById("settingsModalDomain").innerText = domain;
@@ -899,6 +1077,11 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
     document.getElementById("settingsRedirectUrl").value = redirectUrl || "";
     document.getElementById("settingsRedirectType").value = redirectType || 301;
     
+    const nodePortInput = document.getElementById("settingsNodePort");
+    if (nodePortInput) nodePortInput.value = nodePort || 3000;
+    const nodeScriptInput = document.getElementById("settingsNodeScript");
+    if (nodeScriptInput) nodeScriptInput.value = nodeScript || (projectType === 'nextjs' ? 'npm run start' : 'node server.js');
+
     const statusSelect = document.getElementById("settingsSiteStatus");
     if (statusSelect) {
         statusSelect.value = (siteStatus === "deactivated" ? "disabled" : (siteStatus || "active"));
@@ -1102,6 +1285,22 @@ async function reloadSslStatus() {
                 badge.innerText = "No SSL Certificate Installed";
             }
 
+            // Sync table row button in real-time
+            const rowBtn = document.getElementById(`ssl-btn-${currentSslSiteId}`);
+            if (rowBtn) {
+                if (data.is_active) {
+                    rowBtn.innerHTML = `<span>🔒</span> SSL Active`;
+                    rowBtn.style.color = '#34d399';
+                    rowBtn.style.borderColor = 'rgba(52, 211, 153, 0.4)';
+                    rowBtn.style.background = 'rgba(52, 211, 153, 0.08)';
+                } else {
+                    rowBtn.innerHTML = `<span>🔓</span> Manage SSL`;
+                    rowBtn.style.color = '#fbbf24';
+                    rowBtn.style.borderColor = 'rgba(251, 191, 36, 0.4)';
+                    rowBtn.style.background = 'rgba(251, 191, 36, 0.08)';
+                }
+            }
+
             // Values
             document.getElementById("sslValIssuer").innerText = data.issuer || "None";
             document.getElementById("sslValNginx").innerText = data.in_nginx ? "Listening on Port 443 (SSL)" : "Not bound (Port 80 only)";
@@ -1208,6 +1407,131 @@ async function syncVhost(siteId, domain) {
     const res = await fetch(`/websites/${siteId}/sync`, { method: 'POST' });
     const data = await res.json();
     showToast(data.message, data.success ? 'success' : 'danger');
+}
+
+// Node.js & Next.js Process Manager Logic
+let currentNodeSiteId = null;
+let currentNodeDomain = null;
+let currentNodeRootDir = null;
+let currentNodeType = null;
+let currentNodePort = 3000;
+
+async function openNodeManager(siteId, domain, rootDir, projectType, port, script) {
+    currentNodeSiteId = siteId;
+    currentNodeDomain = domain;
+    currentNodeRootDir = rootDir;
+    currentNodeType = projectType || 'nextjs';
+    currentNodePort = port || 3000;
+
+    document.getElementById("nodeModalDomain").innerText = domain;
+    document.getElementById("nodeModalIcon").innerText = (currentNodeType === 'nextjs' ? '▲' : '🟢');
+    document.getElementById("nodeModalTypeBadge").innerText = (currentNodeType === 'nextjs' ? 'Next.js Application' : 'Node.js Application');
+    document.getElementById("nodeModalRoot").innerText = rootDir || 'N/A';
+    document.getElementById("nodeLivePort").innerText = `:${currentNodePort}`;
+
+    const buildBtn = document.getElementById("btnNodeBuild");
+    if (buildBtn) buildBtn.style.display = (currentNodeType === 'nextjs' ? 'inline-flex' : 'none');
+
+    document.getElementById("nodeBuildOutputBox").style.display = "none";
+    document.getElementById("nodeLogsContent").innerText = "Loading real-time logs...";
+
+    openModal("nodeManagerModal");
+    await Promise.all([loadNodeStatus(), loadNodeLogs()]);
+}
+
+async function loadNodeStatus() {
+    if (!currentNodeSiteId) return;
+    try {
+        const res = await fetch(`/websites/${currentNodeSiteId}/node/status`);
+        const data = await res.json();
+        if (data.success && data.status) {
+            const st = data.status;
+            const liveEl = document.getElementById("nodeLiveStatus");
+            if (st.is_running) {
+                liveEl.innerText = "● Online";
+                liveEl.style.color = "#34d399";
+            } else {
+                liveEl.innerText = "● Stopped";
+                liveEl.style.color = "#f87171";
+            }
+            document.getElementById("nodeLivePort").innerText = `:${st.port || currentNodePort}`;
+            document.getElementById("nodeLiveMemory").innerText = st.memory || "0 MB";
+            document.getElementById("nodeLiveCpu").innerText = st.cpu || "0%";
+        }
+    } catch (e) {
+        console.error("Status error:", e);
+    }
+}
+
+async function loadNodeLogs() {
+    if (!currentNodeSiteId) return;
+    const logBox = document.getElementById("nodeLogsContent");
+    try {
+        const res = await fetch(`/websites/${currentNodeSiteId}/node/logs?lines=60`);
+        const data = await res.json();
+        if (data.success) {
+            logBox.innerText = data.logs || "No logs recorded yet.";
+            logBox.scrollTop = logBox.scrollHeight;
+        } else {
+            logBox.innerText = "Failed to load logs: " + (data.error || "Unknown error");
+        }
+    } catch (e) {
+        logBox.innerText = "Error loading logs: " + e;
+    }
+}
+
+async function triggerNodeAction(action) {
+    if (!currentNodeSiteId) return;
+    const actionLabel = action.toUpperCase();
+    showToast(`${actionLabel} requested for ${currentNodeDomain}...`, 'success');
+
+    try {
+        const res = await fetch(`/websites/${currentNodeSiteId}/node/${action}`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            showToast(data.message, 'success');
+        } else {
+            showToast(data.message || data.error || `${action} failed`, 'danger');
+        }
+        await Promise.all([loadNodeStatus(), loadNodeLogs()]);
+    } catch (e) {
+        showToast(`Request failed: ${e}`, 'danger');
+    }
+}
+
+async function triggerNodeBuild() {
+    if (!currentNodeSiteId) return;
+    const btn = document.getElementById("btnNodeBuild");
+    const origHtml = btn.innerHTML;
+    const outBox = document.getElementById("nodeBuildOutputBox");
+
+    btn.disabled = true;
+    btn.innerHTML = `<span>⏳</span> Building Next.js...`;
+    outBox.style.display = "block";
+    outBox.style.color = "#38bdf8";
+    outBox.innerText = `⏳ Running 'npm install' and 'npm run build' for ${currentNodeDomain}...\nThis may take 1-2 minutes for Next.js compilation.`;
+
+    try {
+        const res = await fetch(`/websites/${currentNodeSiteId}/node/build`, { method: 'POST' });
+        const data = await res.json();
+        if (data.success) {
+            outBox.style.color = "#34d399";
+            outBox.innerText = `✅ ${data.message}\nNext.js production build ready!`;
+            showToast("Next.js build succeeded!", "success");
+        } else {
+            outBox.style.color = "#f87171";
+            outBox.innerText = `❌ Build Failed:\n${data.error || data.message}`;
+            showToast("Next.js build failed", "danger");
+        }
+        await loadNodeLogs();
+    } catch (e) {
+        outBox.style.color = "#f87171";
+        outBox.innerText = `❌ Error: ${e}`;
+        showToast(`Build error: ${e}`, "danger");
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origHtml;
+    }
 }
 </script>
 {% endblock %}

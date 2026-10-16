@@ -76,6 +76,22 @@ def init_db():
         cursor.execute("ALTER TABLE websites ADD COLUMN is_maintenance INTEGER DEFAULT 0")
     except Exception:
         pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN node_port INTEGER DEFAULT 3000")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN node_script TEXT DEFAULT 'npm start'")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN node_version TEXT DEFAULT '20'")
+    except Exception:
+        pass
+    try:
+        cursor.execute("ALTER TABLE websites ADD COLUMN node_status TEXT DEFAULT 'stopped'")
+    except Exception:
+        pass
 
     # Audit Logs Table
     cursor.execute('''

@@ -72,7 +72,13 @@ DEBIAN_FRONTEND=noninteractive apt-get install -y \
     curl \
     git \
     ufw \
-    mariadb-server
+    mariadb-server \
+    nodejs \
+    npm
+
+if command -v npm &> /dev/null && ! command -v pm2 &> /dev/null; then
+    npm install -g pm2 >/dev/null 2>&1 || true
+fi
 
 # ------------------------------------------------------------------------------
 # STEP 2: Directory Structure
