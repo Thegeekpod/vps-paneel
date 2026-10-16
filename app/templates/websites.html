@@ -77,7 +77,7 @@
                     </td>
                     <td>
                         {% if site.project_type in ['nextjs', 'nodejs'] %}
-                        <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-family: monospace;">Port :{{ site.node_port or 3000 }}</span>
+                        <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); font-family: monospace;">Node {{ site.node_version or '20' }} · :{{ site.node_port or 3000 }}</span>
                         {% else %}
                         <span class="badge badge-gray">PHP {{ site.php_version }}</span>
                         {% endif %}
@@ -115,7 +115,7 @@
                     <td style="text-align: right;">
                         <div style="display: inline-flex; gap: 6px; align-items: center; justify-content: flex-end;">
                             {% if site.project_type in ['nextjs', 'nodejs'] %}
-                            <button type="button" onclick="openNodeManager({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.project_type }}', {{ site.node_port or 3000 }}, '{{ site.node_script or 'npm start' }}')" class="btn btn-secondary btn-icon" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" title="Manage Node.js / Next.js Process (Start, Stop, Build, PM2 Logs)">
+                            <button type="button" onclick="openNodeManager({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.project_type }}', {{ site.node_port or 3000 }}, '{{ site.node_script or 'npm start' }}', '{{ site.node_version or '20' }}')" class="btn btn-secondary btn-icon" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); background: rgba(56, 189, 248, 0.08);" title="Manage Node.js / Next.js Process (Start, Stop, Build, PM2 Logs)">
                                 {% if site.project_type == 'nextjs' %}▲{% else %}🟢{% endif %}
                             </button>
                             {% endif %}
@@ -125,7 +125,7 @@
                             <a href="/terminal?dir={{ site.root_dir }}" class="btn btn-secondary btn-icon" title="Open Terminal in Website Root ({{ site.root_dir }})" target="_blank">
                                 💻
                             </a>
-                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }}, '{{ curr_status }}', {{ site.node_port or 3000 }}, '{{ site.node_script or 'npm start' }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
+                            <button onclick="openSiteSettings({{ site.id }}, '{{ site.domain }}', '{{ site.root_dir }}', '{{ site.php_version }}', '{{ site.git_repo or '' }}', '{{ site.git_branch or '' }}', '{{ site.db_name or '' }}', '{{ site.project_type or 'php' }}', '{{ site.redirect_url or '' }}', {{ site.redirect_type or 301 }}, '{{ curr_status }}', {{ site.node_port or 3000 }}, '{{ site.node_script or 'npm start' }}', '{{ site.node_version or '20' }}')" class="btn btn-secondary btn-icon" title="Website Settings (Root Directory, PHP, DB, Framework, Redirect)">
                                 ⚙️
                             </button>
                             {% if site.git_repo %}
@@ -195,7 +195,17 @@
                     </span>
                     <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px;">PM2 Managed</span>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                    <div>
+                        <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">Node.js Version</label>
+                        <select name="node_version" id="addNodeVersion" style="width: 100%;">
+                            <option value="20" selected>Node 20 (LTS Iron)</option>
+                            <option value="22">Node 22 (LTS Jod)</option>
+                            <option value="18">Node 18 (LTS Hydrogen)</option>
+                            <option value="24">Node 24 (Current)</option>
+                            <option value="system">System Default</option>
+                        </select>
+                    </div>
                     <div>
                         <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">App Port (Local)</label>
                         <input type="number" name="node_port" id="addNodePort" value="{{ next_node_port or 3000 }}" min="1000" max="65535" style="width: 100%; font-family: monospace;">
@@ -206,7 +216,7 @@
                     </div>
                 </div>
                 <span style="font-size: 11px; color: var(--text-muted); display: block; line-height: 1.4;">
-                    Nginx reverse proxies requests from your domain to <code>http://127.0.0.1:[Port]</code> with full WebSocket and SSL support.
+                    Node.js version is supervised per-website via PM2 with reverse-proxy on <code>http://127.0.0.1:[Port]</code>.
                 </span>
             </div>
 
@@ -359,7 +369,17 @@
                         </span>
                         <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px;">PM2 Managed</span>
                     </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+                        <div>
+                            <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">Node.js Version</label>
+                            <select name="node_version" id="settingsNodeVersion" style="width: 100%;">
+                                <option value="20">Node 20 (LTS Iron)</option>
+                                <option value="22">Node 22 (LTS Jod)</option>
+                                <option value="18">Node 18 (LTS Hydrogen)</option>
+                                <option value="24">Node 24 (Current)</option>
+                                <option value="system">System Default</option>
+                            </select>
+                        </div>
                         <div>
                             <label style="display: block; font-size: 11px; color: var(--text-secondary); margin-bottom: 4px; font-weight: 500;">Internal Port</label>
                             <input type="number" name="node_port" id="settingsNodePort" value="3000" min="1000" max="65535" style="width: 100%; font-family: monospace;">
@@ -370,7 +390,7 @@
                         </div>
                     </div>
                     <span style="font-size: 11px; color: var(--text-muted); display: block; line-height: 1.4;">
-                        Nginx reverse proxies traffic for this site to <code>http://127.0.0.1:[Port]</code>.
+                        Node.js version is supervised per-website via PM2 with reverse-proxy on <code>http://127.0.0.1:[Port]</code>.
                     </span>
                 </div>
 
@@ -766,6 +786,7 @@
                 </h3>
                 <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px;">
                     <span id="nodeModalTypeBadge" class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8;">Next.js Application</span>
+                    <span id="nodeModalVersionBadge" class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-weight: 600;">Node v20</span>
                     <span style="font-size: 12px; color: var(--text-muted);">Root: <code id="nodeModalRoot" style="color: #cbd5e1;">/www/wwwroot/...</code></span>
                 </div>
             </div>
@@ -773,10 +794,14 @@
         </div>
 
         <!-- Real-time Status Cards -->
-        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 18px;">
+        <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 18px;">
             <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
                 <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Runtime State</div>
                 <div id="nodeLiveStatus" style="font-size: 13px; font-weight: 700; color: #34d399; margin-top: 2px;">Checking...</div>
+            </div>
+            <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
+                <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Node.js Ver</div>
+                <div id="nodeLiveVersion" style="font-size: 13px; font-weight: 700; color: #c084fc; margin-top: 2px;">v20</div>
             </div>
             <div class="card" style="padding: 10px 12px; background: rgba(255,255,255,0.02);">
                 <div style="font-size: 10px; color: var(--text-muted); text-transform: uppercase;">Internal Port</div>
@@ -1064,7 +1089,7 @@ async function selectSiteStatus(newStatus) {
     }
 }
 
-function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType, siteStatus, nodePort, nodeScript) {
+function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, dbName, projectType, redirectUrl, redirectType, siteStatus, nodePort, nodeScript, nodeVersion) {
     currentSiteSettingsId = id;
     document.getElementById("settingsSiteId").value = id;
     document.getElementById("settingsModalDomain").innerText = domain;
@@ -1081,6 +1106,8 @@ function openSiteSettings(id, domain, rootDir, phpVersion, gitRepo, gitBranch, d
     if (nodePortInput) nodePortInput.value = nodePort || 3000;
     const nodeScriptInput = document.getElementById("settingsNodeScript");
     if (nodeScriptInput) nodeScriptInput.value = nodeScript || (projectType === 'nextjs' ? 'npm run start' : 'node server.js');
+    const nodeVersionSelect = document.getElementById("settingsNodeVersion");
+    if (nodeVersionSelect) nodeVersionSelect.value = nodeVersion || "20";
 
     const statusSelect = document.getElementById("settingsSiteStatus");
     if (statusSelect) {
@@ -1415,17 +1442,23 @@ let currentNodeDomain = null;
 let currentNodeRootDir = null;
 let currentNodeType = null;
 let currentNodePort = 3000;
+let currentNodeVersion = '20';
 
-async function openNodeManager(siteId, domain, rootDir, projectType, port, script) {
+async function openNodeManager(siteId, domain, rootDir, projectType, port, script, nodeVersion) {
     currentNodeSiteId = siteId;
     currentNodeDomain = domain;
     currentNodeRootDir = rootDir;
     currentNodeType = projectType || 'nextjs';
     currentNodePort = port || 3000;
+    currentNodeVersion = nodeVersion || '20';
 
     document.getElementById("nodeModalDomain").innerText = domain;
     document.getElementById("nodeModalIcon").innerText = (currentNodeType === 'nextjs' ? '▲' : '🟢');
     document.getElementById("nodeModalTypeBadge").innerText = (currentNodeType === 'nextjs' ? 'Next.js Application' : 'Node.js Application');
+    const verBadge = document.getElementById("nodeModalVersionBadge");
+    if (verBadge) verBadge.innerText = `Node v${currentNodeVersion}`;
+    const liveVer = document.getElementById("nodeLiveVersion");
+    if (liveVer) liveVer.innerText = `v${currentNodeVersion}`;
     document.getElementById("nodeModalRoot").innerText = rootDir || 'N/A';
     document.getElementById("nodeLivePort").innerText = `:${currentNodePort}`;
 

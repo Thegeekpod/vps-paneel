@@ -122,6 +122,114 @@
     </div>
 </div>
 
+<!-- Node.js Version Manager (Multi-Version Control) -->
+<div class="card" style="padding: 20px; margin-bottom: 24px; background: rgba(15, 23, 42, 0.5); border: 1px solid rgba(56, 189, 248, 0.2);">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+        <div>
+            <h3 style="font-size: 16px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+                <span>🔀</span> Node.js Version Control & Multi-Version Manager
+            </h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
+                Switch system default Node.js version or run different versions per website (Node 18, 20, 22, 24)
+            </p>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 12px; color: var(--text-secondary);">Active Default:</span>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 700; font-family: monospace; font-size: 12px;">
+                {{ node_versions.current_version or 'Not Installed' }}
+            </span>
+        </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+        <!-- Installed Versions List -->
+        <div>
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 10px; display: flex; justify-content: space-between;">
+                <span>Installed Node.js Versions</span>
+                <span>{{ node_versions.installed|length }} Installed</span>
+            </div>
+
+            {% if node_versions.installed and node_versions.installed|length > 0 %}
+            <div style="display: flex; flex-direction: column; gap: 8px;">
+                {% for v in node_versions.installed %}
+                <div style="display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: rgba(30, 41, 59, 0.4); border: 1px solid {% if v.is_current %}rgba(52, 211, 153, 0.4){% else %}var(--border){% endif %}; border-radius: 8px;">
+                    <div>
+                        <div style="font-weight: 600; font-size: 14px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                            <span>Node {{ v.version }}</span>
+                            {% if v.is_current %}
+                            <span class="badge badge-success" style="font-size: 10px; padding: 2px 6px;">● Active Default</span>
+                            {% endif %}
+                        </div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: monospace; overflow: hidden; text-overflow: ellipsis; max-width: 260px;" title="{{ v.path }}">
+                            {{ v.path }}
+                        </div>
+                    </div>
+                    <div style="display: flex; gap: 6px;">
+                        {% if not v.is_current %}
+                        <button onclick="switchNodeVersion('{{ v.version }}')" class="btn btn-secondary" style="font-size: 11px; padding: 5px 10px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.3);">
+                            Set Default
+                        </button>
+                        <button onclick="uninstallNodeVersion('{{ v.version }}')" class="btn btn-secondary" style="font-size: 11px; padding: 5px 8px; color: #f87171;" title="Uninstall Node {{ v.version }}">
+                            🗑️
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div style="padding: 16px; background: rgba(30, 41, 59, 0.2); border: 1px dashed var(--border); border-radius: 8px; text-align: center; color: var(--text-muted); font-size: 13px;">
+                No Node.js versions detected via NVM yet.
+            </div>
+            {% endif %}
+        </div>
+
+        <!-- Available Versions / 1-Click Installers -->
+        <div>
+            <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 10px;">
+                Available LTS Channels to Install
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 14px;">
+                {% for ch in node_versions.available %}
+                <div style="padding: 12px; background: rgba(30, 41, 59, 0.4); border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div>
+                        <div style="font-weight: 600; font-size: 13px; color: #f8fafc;">{{ ch.title }}</div>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                            {% if ch.is_installed %}
+                            <span style="color: #34d399;">✓ Installed</span>
+                            {% else %}
+                            <span>Ready to install</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div style="margin-top: 10px;">
+                        {% if ch.is_installed %}
+                        <button onclick="switchNodeVersion('{{ ch.major }}')" class="btn btn-secondary" style="width: 100%; font-size: 11px; padding: 4px 8px;">
+                            Switch to Node {{ ch.major }}
+                        </button>
+                        {% else %}
+                        <button onclick="installNodeVersion('{{ ch.major }}')" id="btnInstallNode_{{ ch.major }}" class="btn btn-primary" style="width: 100%; font-size: 11px; padding: 4px 8px;">
+                            + Install Node {{ ch.major }}
+                        </button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- Custom Version Quick Install -->
+            <div style="display: flex; gap: 8px; align-items: center; background: rgba(30, 41, 59, 0.3); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border);">
+                <span style="font-size: 12px; color: var(--text-secondary); white-space: nowrap;">Custom Version:</span>
+                <input type="text" id="inputCustomNodeVer" placeholder="e.g. 21 or 20.15.0" style="padding: 4px 8px; font-size: 12px; font-family: monospace; flex: 1;">
+                <button onclick="installCustomNodeVersion()" class="btn btn-secondary" style="font-size: 11px; padding: 5px 12px; white-space: nowrap;">
+                    Install
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Active Node.js / Next.js Websites List -->
 <div class="card" style="padding: 0; overflow: hidden; margin-bottom: 30px;">
     <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); flex-wrap: wrap; gap: 10px;">
@@ -261,6 +369,65 @@ async function installNodeEnvironment() {
     } catch (e) {
         showToast(`Install error: ${e}`, 'danger');
         if (btn) btn.disabled = false;
+    }
+}
+
+async function switchNodeVersion(version) {
+    showToast(`Switching default Node.js version to Node ${version}...`, 'success');
+    const formData = new FormData();
+    formData.append('version', version);
+    try {
+        const res = await fetch('/services/node-version/switch', { method: 'POST', body: formData });
+        const data = await res.json();
+        showToast(data.message, data.success ? 'success' : 'danger');
+        if (data.success) setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+        showToast(`Switch error: ${e}`, 'danger');
+    }
+}
+
+async function installNodeVersion(version) {
+    const btn = document.getElementById(`btnInstallNode_${version}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `⏳ Installing Node ${version}...`;
+    }
+    showToast(`Installing Node.js ${version} via NVM... This may take 1-2 minutes.`, 'success');
+    const formData = new FormData();
+    formData.append('version', version);
+    try {
+        const res = await fetch('/services/node-version/install', { method: 'POST', body: formData });
+        const data = await res.json();
+        showToast(data.message, data.success ? 'success' : 'danger');
+        if (data.success) setTimeout(() => location.reload(), 2000);
+        else if (btn) { btn.disabled = false; btn.innerHTML = `+ Install Node ${version}`; }
+    } catch (e) {
+        showToast(`Install error: ${e}`, 'danger');
+        if (btn) { btn.disabled = false; btn.innerHTML = `+ Install Node ${version}`; }
+    }
+}
+
+async function installCustomNodeVersion() {
+    const val = document.getElementById("inputCustomNodeVer").value.trim();
+    if (!val) {
+        showToast("Please enter a Node.js version (e.g. 20, 22, 18.20.0)", "danger");
+        return;
+    }
+    installNodeVersion(val);
+}
+
+async function uninstallNodeVersion(version) {
+    if (!confirm(`Are you sure you want to uninstall Node.js ${version}?`)) return;
+    showToast(`Uninstalling Node.js ${version}...`, 'success');
+    const formData = new FormData();
+    formData.append('version', version);
+    try {
+        const res = await fetch('/services/node-version/uninstall', { method: 'POST', body: formData });
+        const data = await res.json();
+        showToast(data.message, data.success ? 'success' : 'danger');
+        if (data.success) setTimeout(() => location.reload(), 1500);
+    } catch (e) {
+        showToast(`Uninstall error: ${e}`, 'danger');
     }
 }
 </script>

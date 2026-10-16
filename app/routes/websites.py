@@ -23,7 +23,8 @@ from app.services.node_service import (
     get_node_app_status,
     build_node_app,
     get_node_logs,
-    get_node_environment
+    get_node_environment,
+    get_installed_node_versions
 )
 from app.templates_util import render
 
@@ -72,6 +73,10 @@ async def list_websites(
 
     next_node_port = get_next_available_node_port()
     node_env = get_node_environment()
+    try:
+        node_versions = get_installed_node_versions()
+    except Exception:
+        node_versions = {"current_version": "20", "installed": [], "available": []}
 
     return render("websites.html", {
         "user": user,
@@ -80,7 +85,8 @@ async def list_websites(
         "error": error,
         "success": success,
         "next_node_port": next_node_port,
-        "node_env": node_env
+        "node_env": node_env,
+        "node_versions": node_versions
     }, request)
 
 def setup_laravel_environment(
@@ -197,6 +203,7 @@ async def create_website_action(
     project_type: str = Form("php"),
     node_port: Optional[int] = Form(None),
     node_script: Optional[str] = Form(None),
+    node_version: Optional[str] = Form("20"),
     git_repo: Optional[str] = Form(None),
     git_branch: Optional[str] = Form(None),
     create_db: Optional[str] = Form(None),
@@ -358,6 +365,7 @@ async def create_website_action(
         # Node.js / Next.js initialization
         clean_node_port = 3000
         clean_node_script = "npm start"
+        clean_node_version = (node_version or "20").strip().lstrip("v")
         if project_type in ["nextjs", "nodejs"]:
             clean_node_port = int(node_port) if node_port and int(node_port) > 0 else get_next_available_node_port()
             clean_node_script = (node_script or ("npm run start" if project_type == "nextjs" else "node server.js")).strip()
@@ -438,7 +446,7 @@ server.listen(port, '127.0.0.1', () => {{
   console.log(`Server running on http://127.0.0.1:${{port}}`);
 }});
 """)
-                        start_node_app(domain, str(site_root), clean_node_script, clean_node_port)
+                        start_node_app(domain, str(site_root), clean_node_script, clean_node_port, node_version=clean_node_version)
                 except Exception:
                     pass
 
@@ -453,8 +461,8 @@ server.listen(port, '127.0.0.1', () => {{
         cursor = conn.cursor()
         try:
             cursor.execute(
-                "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type, node_port, node_script, node_status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type, clean_node_port if project_type in ["nextjs", "nodejs"] else None, clean_node_script if project_type in ["nextjs", "nodejs"] else None, "running" if project_type == "nodejs" and not clean_git_repo else "stopped")
+                "INSERT INTO websites (domain, root_dir, php_version, status, git_repo, git_branch, db_name, project_type, node_port, node_script, node_status, node_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (domain, str(site_root), php_version, "active" if vhost_success else "failed", clean_git_repo or None, clean_git_branch or None, linked_db_name, project_type, clean_node_port if project_type in ["nextjs", "nodejs"] else None, clean_node_script if project_type in ["nextjs", "nodejs"] else None, "running" if project_type == "nodejs" and not clean_git_repo else "stopped", clean_node_version if project_type in ["nextjs", "nodejs"] else None)
             )
             conn.commit()
         except Exception as e:
@@ -890,6 +898,7 @@ async def update_website_settings(
     project_type: str = Form("php"),
     node_port: Optional[int] = Form(None),
     node_script: Optional[str] = Form(None),
+    node_version: Optional[str] = Form(None),
     redirect_url: Optional[str] = Form(None),
     redirect_type: int = Form(301),
     git_repo: Optional[str] = Form(None),
@@ -945,6 +954,10 @@ async def update_website_settings(
     if node_script and node_script.strip():
         clean_node_script = node_script.strip()
 
+    clean_node_version = site["node_version"] if "node_version" in site_keys and site["node_version"] else "20"
+    if node_version and node_version.strip():
+        clean_node_version = node_version.strip().lstrip("v")
+
     # Reconfigure Nginx vhost with new settings
     vhost_success, vhost_msg = create_vhost(
         domain,
@@ -976,13 +989,13 @@ async def update_website_settings(
         setup_laravel_environment(new_root, clean_db_name, php_version=php_version)
 
     cursor.execute(
-        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ?, status = ?, is_maintenance = ?, node_port = ?, node_script = ? WHERE id = ?",
-        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, current_status, 1 if is_maintenance else 0, clean_node_port, clean_node_script, site_id)
+        "UPDATE websites SET root_dir = ?, php_version = ?, git_repo = ?, git_branch = ?, db_name = ?, project_type = ?, redirect_url = ?, redirect_type = ?, status = ?, is_maintenance = ?, node_port = ?, node_script = ?, node_version = ? WHERE id = ?",
+        (str(new_root), php_version, clean_git_repo or None, clean_git_branch or None, clean_db_name, project_type, clean_redirect_url, redirect_type, current_status, 1 if is_maintenance else 0, clean_node_port, clean_node_script, clean_node_version, site_id)
     )
     conn.commit()
     conn.close()
 
-    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, Redirect: {clean_redirect_url}", get_client_ip(request))
+    log_action(user["username"], "UpdateWebsiteSettings", f"Domain: {domain}, Type: {project_type}, Root: {new_root}, NodeVer: {clean_node_version}", get_client_ip(request))
     return RedirectResponse(url=f"/websites?success={urllib.parse.quote(f'Settings updated for {domain}')}", status_code=303)
 
 @router.post("/{site_id}/node/start")
@@ -997,8 +1010,9 @@ async def node_start_action(site_id: int, request: Request, user: dict = Depends
 
     port = site["node_port"] or 3000
     script = site["node_script"] or "npm start"
-    ok, msg = start_node_app(site["domain"], site["root_dir"], script=script, port=port)
-    log_action(user["username"], "StartNodeApp", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
+    node_ver = site["node_version"] if "node_version" in site.keys() and site["node_version"] else "20"
+    ok, msg = start_node_app(site["domain"], site["root_dir"], script=script, port=port, node_version=node_ver)
+    log_action(user["username"], "StartNodeApp", f"Domain: {site['domain']}, NodeVer: {node_ver}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": ok, "message": msg, "error": None if ok else msg})
 
 @router.post("/{site_id}/node/stop")
@@ -1027,8 +1041,9 @@ async def node_restart_action(site_id: int, request: Request, user: dict = Depen
 
     port = site["node_port"] or 3000
     script = site["node_script"] or "npm start"
-    ok, msg = restart_node_app(site["domain"], site["root_dir"], script=script, port=port)
-    log_action(user["username"], "RestartNodeApp", f"Domain: {site['domain']}, Result: {msg}", get_client_ip(request))
+    node_ver = site["node_version"] if "node_version" in site.keys() and site["node_version"] else "20"
+    ok, msg = restart_node_app(site["domain"], site["root_dir"], script=script, port=port, node_version=node_ver)
+    log_action(user["username"], "RestartNodeApp", f"Domain: {site['domain']}, NodeVer: {node_ver}, Result: {msg}", get_client_ip(request))
     return JSONResponse({"success": ok, "message": msg, "error": None if ok else msg})
 
 @router.post("/{site_id}/node/build")

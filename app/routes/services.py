@@ -5,7 +5,11 @@ from app.services.system_service import get_service_status, control_service
 from app.services.node_service import (
     get_node_environment,
     get_all_configured_node_apps,
-    install_node_environment
+    install_node_environment,
+    get_installed_node_versions,
+    switch_node_version,
+    install_node_version,
+    uninstall_node_version
 )
 from app.database import log_action
 from app.templates_util import render
@@ -61,6 +65,16 @@ async def services_view(request: Request, user: dict = Depends(login_required)):
             }
 
         try:
+            node_versions = get_installed_node_versions()
+        except Exception:
+            node_versions = {
+                "current_version": "Not installed",
+                "has_nvm": False,
+                "installed": [],
+                "available": []
+            }
+
+        try:
             node_apps = get_all_configured_node_apps()
         except Exception:
             node_apps = []
@@ -72,6 +86,7 @@ async def services_view(request: Request, user: dict = Depends(login_required)):
             "user": user,
             "services": services,
             "node_env": node_env,
+            "node_versions": node_versions,
             "node_apps": node_apps,
             "online_count": online_count,
             "stopped_count": stopped_count,
@@ -90,6 +105,7 @@ async def services_view(request: Request, user: dict = Depends(login_required)):
                 {"name": "ufw", "title": "UFW Firewall", "desc": "Uncomplicated Firewall", "is_active": True},
             ],
             "node_env": {"installed": False, "node_version": "Not detected", "npm_version": "Not detected", "pm2_version": "Not detected", "has_pm2": False},
+            "node_versions": {"current_version": "Not installed", "has_nvm": False, "installed": [], "available": []},
             "node_apps": [],
             "online_count": 0,
             "stopped_count": 0,
@@ -112,4 +128,35 @@ async def install_node_endpoint(request: Request, user: dict = Depends(login_req
     success, msg = install_node_environment()
     log_action(user["username"], "InstallNodeEnv", msg, request.client.host)
     return JSONResponse({"success": success, "message": msg})
+
+@router.post("/node-version/switch")
+async def switch_node_version_endpoint(
+    request: Request,
+    version: str = Form(...),
+    user: dict = Depends(login_required)
+):
+    success, msg = switch_node_version(version)
+    log_action(user["username"], "SwitchNodeVersion", f"Target: {version}, Result: {msg}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
+@router.post("/node-version/install")
+async def install_node_version_endpoint(
+    request: Request,
+    version: str = Form(...),
+    user: dict = Depends(login_required)
+):
+    success, msg = install_node_version(version)
+    log_action(user["username"], "InstallNodeVersion", f"Target: {version}, Result: {msg}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
+@router.post("/node-version/uninstall")
+async def uninstall_node_version_endpoint(
+    request: Request,
+    version: str = Form(...),
+    user: dict = Depends(login_required)
+):
+    success, msg = uninstall_node_version(version)
+    log_action(user["username"], "UninstallNodeVersion", f"Target: {version}, Result: {msg}", request.client.host)
+    return JSONResponse({"success": success, "message": msg})
+
 

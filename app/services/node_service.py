@@ -29,6 +29,205 @@ def find_binary(name: str) -> Optional[str]:
             return p
     return None
 
+def get_nvm_dir() -> Path:
+    """Finds NVM root directory on the system."""
+    candidates = [
+        Path(os.environ.get("NVM_DIR", "")),
+        Path("/root/.nvm"),
+        Path.home() / ".nvm",
+        Path("/usr/local/nvm"),
+        Path.home() / "Library" / "Application Support" / "Herd" / "config" / "nvm"
+    ]
+    for c in candidates:
+        if c and str(c) != "." and (c / "nvm.sh").exists():
+            return c
+    return Path("/root/.nvm") if (os.name != 'nt' and hasattr(os, 'getuid') and os.getuid() == 0) else (Path.home() / ".nvm")
+
+def ensure_nvm_installed() -> bool:
+    """Installs official NVM (Node Version Manager) if missing."""
+    nvm_dir = get_nvm_dir()
+    if (nvm_dir / "nvm.sh").exists():
+        return True
+    if os.name == 'nt':
+        return False
+    try:
+        cmd = 'curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash'
+        subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=120)
+        return (nvm_dir / "nvm.sh").exists()
+    except Exception:
+        return False
+
+def run_nvm_command(cmd_args: str, timeout: int = 180) -> Tuple[int, str, str]:
+    """Executes a command within an NVM environment."""
+    nvm_dir = get_nvm_dir()
+    sh_file = nvm_dir / "nvm.sh"
+    if not sh_file.exists():
+        ensure_nvm_installed()
+
+    script = f'''
+    export NVM_DIR="{nvm_dir}"
+    [ -s "$NVM_DIR/nvm.sh" ] && \\. "$NVM_DIR/nvm.sh"
+    {cmd_args}
+    '''
+    try:
+        res = subprocess.run(["bash", "-c", script], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout)
+        return res.returncode, res.stdout.strip(), res.stderr.strip()
+    except Exception as e:
+        return -1, "", str(e)
+
+def get_installed_node_versions() -> Dict[str, Any]:
+    """Retrieves all installed Node.js versions, current default, and available LTS versions."""
+    nvm_dir = get_nvm_dir()
+    versions_dir = nvm_dir / "versions" / "node"
+
+    # 1. Current active system version
+    node_bin = find_binary("node")
+    current_version = None
+    if node_bin:
+        try:
+            res = subprocess.run([node_bin, "-v"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+            current_version = res.stdout.strip()
+        except Exception:
+            pass
+
+    installed = []
+    seen_majors = set()
+
+    # 2. Check NVM versions directory
+    if versions_dir.exists():
+        for p in sorted(versions_dir.iterdir(), key=lambda x: x.name, reverse=True):
+            if p.is_dir() and p.name.startswith("v"):
+                v_str = p.name
+                node_exec = p / "bin" / "node"
+                if node_exec.exists():
+                    major = v_str[1:].split(".")[0] if "." in v_str else v_str[1:]
+                    is_curr = bool(current_version and (current_version == v_str or current_version.startswith(v_str)))
+                    installed.append({
+                        "version": v_str,
+                        "major": major,
+                        "path": str(node_exec),
+                        "is_current": is_curr
+                    })
+                    seen_majors.add(major)
+
+    # 3. If system node exists and was not in NVM
+    if node_bin and not any(i.get("is_current") for i in installed):
+        curr_major = ""
+        if current_version and current_version.startswith("v"):
+            curr_major = current_version[1:].split(".")[0]
+        installed.insert(0, {
+            "version": current_version or "System Node",
+            "major": curr_major,
+            "path": node_bin,
+            "is_current": True
+        })
+        if curr_major:
+            seen_majors.add(curr_major)
+
+    # 4. Standard LTS channels available
+    channels = [
+        {"major": "22", "title": "Node.js 22 (LTS Jod)", "recommended": True},
+        {"major": "20", "title": "Node.js 20 (LTS Iron)", "recommended": False},
+        {"major": "18", "title": "Node.js 18 (LTS Hydrogen)", "recommended": False},
+        {"major": "24", "title": "Node.js 24 (Current)", "recommended": False},
+    ]
+
+    available = []
+    for ch in channels:
+        available.append({
+            **ch,
+            "is_installed": ch["major"] in seen_majors
+        })
+
+    return {
+        "current_version": current_version or "Not installed",
+        "has_nvm": (nvm_dir / "nvm.sh").exists(),
+        "installed": installed,
+        "available": available
+    }
+
+def get_node_binary_for_version(version: Optional[str]) -> Optional[str]:
+    """Finds the node binary path for a requested major version or version string."""
+    if not version or str(version).lower() in ["default", "system"]:
+        return find_binary("node")
+
+    clean_v = str(version).strip().lstrip("v")
+    nvm_dir = get_nvm_dir()
+    versions_dir = nvm_dir / "versions" / "node"
+
+    if versions_dir.exists():
+        for p in sorted(versions_dir.iterdir(), key=lambda x: x.name, reverse=True):
+            if p.is_dir():
+                name_clean = p.name.lstrip("v")
+                if name_clean == clean_v or name_clean.startswith(f"{clean_v}."):
+                    node_exec = p / "bin" / "node"
+                    if node_exec.exists():
+                        return str(node_exec)
+
+    return find_binary("node")
+
+def switch_node_version(target_version: str) -> Tuple[bool, str]:
+    """Switches the default active Node.js version on the server."""
+    clean_v = target_version.strip()
+    if clean_v.startswith("v"):
+        clean_v = clean_v[1:]
+
+    target_bin = get_node_binary_for_version(clean_v)
+    if not target_bin or not Path(target_bin).exists():
+        return False, f"Node.js version {target_version} is not installed. Install it first."
+
+    # 1. If NVM available, set alias default
+    run_nvm_command(f"nvm alias default {clean_v} && nvm use {clean_v}")
+
+    # 2. Symlink to /usr/local/bin and /usr/bin for global system persistence
+    target_node = Path(target_bin)
+    target_npm = target_node.parent / "npm"
+    for dest_dir in [Path("/usr/local/bin"), Path("/usr/bin")]:
+        try:
+            if dest_dir.exists() and os.name != 'nt' and hasattr(os, 'getuid') and os.getuid() == 0:
+                link_node = dest_dir / "node"
+                if link_node.is_symlink() or not link_node.exists():
+                    link_node.unlink(missing_ok=True)
+                    link_node.symlink_to(target_node)
+                if target_npm.exists():
+                    link_npm = dest_dir / "npm"
+                    if link_npm.is_symlink() or not link_npm.exists():
+                        link_npm.unlink(missing_ok=True)
+                        link_npm.symlink_to(target_npm)
+        except Exception:
+            pass
+
+    # 3. Ensure PM2 is installed in this Node version
+    target_pm2 = target_node.parent / "pm2"
+    if not target_pm2.exists() and target_npm.exists():
+        try:
+            subprocess.run([str(target_npm), "install", "-g", "pm2"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=60)
+        except Exception:
+            pass
+
+    return True, f"Switched default Node.js version to Node {clean_v} successfully."
+
+def install_node_version(version: str) -> Tuple[bool, str]:
+    """Installs a specific Node.js version via NVM."""
+    clean_v = version.strip()
+    ensure_nvm_installed()
+
+    code, out, err = run_nvm_command(f"nvm install {clean_v}", timeout=300)
+    if code != 0:
+        return False, f"NVM install failed: {err or out}"
+
+    # Also install pm2 for the newly installed version
+    run_nvm_command(f"nvm use {clean_v} && npm install -g pm2", timeout=120)
+    return True, f"Node.js {clean_v} installed successfully via NVM!"
+
+def uninstall_node_version(version: str) -> Tuple[bool, str]:
+    """Uninstalls an unused Node.js version via NVM."""
+    clean_v = version.strip()
+    code, out, err = run_nvm_command(f"nvm uninstall {clean_v}", timeout=60)
+    if code != 0:
+        return False, f"NVM uninstall failed: {err or out}"
+    return True, f"Node.js {clean_v} uninstalled successfully."
+
 def get_node_environment() -> Dict[str, Any]:
     """Detects system Node.js, NPM, and PM2 versions."""
     node_bin = find_binary("node")
@@ -148,8 +347,8 @@ def install_pm2_if_missing() -> bool:
     except Exception:
         return False
 
-def start_node_app(domain: str, root_dir: str, script: str = "npm start", port: int = 3000) -> Tuple[bool, str]:
-    """Starts a Node.js or Next.js application using PM2 or background runner."""
+def start_node_app(domain: str, root_dir: str, script: str = "npm start", port: int = 3000, node_version: Optional[str] = None) -> Tuple[bool, str]:
+    """Starts a Node.js or Next.js application using PM2 or background runner with specified Node version."""
     env_info = get_node_environment()
     pm2_bin = env_info.get("pm2_path")
 
@@ -165,6 +364,12 @@ def start_node_app(domain: str, root_dir: str, script: str = "npm start", port: 
     env = os.environ.copy()
     env["PORT"] = str(port)
     env["NODE_ENV"] = "production"
+
+    # Prepend specific Node.js binary directory to PATH if requested
+    node_bin = get_node_binary_for_version(node_version)
+    if node_bin and Path(node_bin).exists():
+        bin_dir = str(Path(node_bin).parent)
+        env["PATH"] = f"{bin_dir}:{env.get('PATH', '')}"
 
     if pm2_bin:
         # Stop existing instance if any
@@ -187,6 +392,8 @@ def start_node_app(domain: str, root_dir: str, script: str = "npm start", port: 
                 "--name", domain,
                 "--cwd", str(root_path)
             ]
+            if node_bin:
+                cmd.extend(["--interpreter", node_bin])
         elif clean_script.startswith("next start"):
             cmd = [
                 pm2_bin, "start", "npx",
@@ -207,7 +414,7 @@ def start_node_app(domain: str, root_dir: str, script: str = "npm start", port: 
 
             # Save PM2 state for automatic reboot persistence
             subprocess.run([pm2_bin, "save"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
-            update_node_status_in_db(domain, "running", port, clean_script)
+            update_node_status_in_db(domain, "running", port, clean_script, node_version)
             return True, f"Application '{domain}' started successfully on port {port} via PM2."
         except Exception as e:
             return False, f"Failed to start PM2 process: {e}"
@@ -218,7 +425,7 @@ def start_node_app(domain: str, root_dir: str, script: str = "npm start", port: 
     run_cmd = f"PORT={port} NODE_ENV=production nohup {clean_script} > {log_file} 2>&1 & echo $! > {pid_file}"
     try:
         proc = subprocess.Popen(run_cmd, shell=True, cwd=str(root_path), env=env)
-        update_node_status_in_db(domain, "running", port, clean_script)
+        update_node_status_in_db(domain, "running", port, clean_script, node_version)
         return True, f"Application started in background on port {port} (PID tracked)."
     except Exception as e:
         return False, f"Fallback execution error: {e}"
@@ -252,20 +459,20 @@ def stop_node_app(domain: str, root_dir: str = "") -> Tuple[bool, str]:
     update_node_status_in_db(domain, "stopped")
     return True, f"Application '{domain}' stopped successfully."
 
-def restart_node_app(domain: str, root_dir: str = "", script: str = "npm start", port: int = 3000) -> Tuple[bool, str]:
+def restart_node_app(domain: str, root_dir: str = "", script: str = "npm start", port: int = 3000, node_version: Optional[str] = None) -> Tuple[bool, str]:
     """Restarts the Node.js/Next.js application."""
     pm2_bin = find_binary("pm2")
     if pm2_bin:
         try:
             res = subprocess.run([pm2_bin, "restart", domain], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
             if res.returncode == 0:
-                update_node_status_in_db(domain, "running", port, script)
+                update_node_status_in_db(domain, "running", port, script, node_version)
                 return True, f"Application '{domain}' restarted successfully via PM2."
         except Exception:
             pass
 
     stop_node_app(domain, root_dir)
-    return start_node_app(domain, root_dir, script, port)
+    return start_node_app(domain, root_dir, script, port, node_version)
 
 def get_node_app_status(domain: str, port: int = 3000) -> Dict[str, Any]:
     """Gets real-time runtime status for a Node.js/Next.js application."""
@@ -365,18 +572,24 @@ def build_node_app(root_dir: str) -> Tuple[bool, str]:
     except Exception as e:
         return False, f"Build error: {e}"
 
-def update_node_status_in_db(domain: str, status: str, port: int = None, script: str = None):
-    """Updates node_status, node_port, and node_script in database."""
+def update_node_status_in_db(domain: str, status: str, port: int = None, script: str = None, version: str = None):
+    """Updates node_status, node_port, node_script, and node_version in database."""
     try:
         conn = get_db()
         cursor = conn.cursor()
-        if port and script:
-            cursor.execute(
-                "UPDATE websites SET node_status = ?, node_port = ?, node_script = ? WHERE domain = ?",
-                (status, port, script, domain)
-            )
-        else:
-            cursor.execute("UPDATE websites SET node_status = ? WHERE domain = ?", (status, domain))
+        updates = ["node_status = ?"]
+        params = [status]
+        if port is not None:
+            updates.append("node_port = ?")
+            params.append(port)
+        if script is not None:
+            updates.append("node_script = ?")
+            params.append(script)
+        if version is not None:
+            updates.append("node_version = ?")
+            params.append(version)
+        params.append(domain)
+        cursor.execute(f"UPDATE websites SET {', '.join(updates)} WHERE domain = ?", tuple(params))
         conn.commit()
         conn.close()
     except Exception:
