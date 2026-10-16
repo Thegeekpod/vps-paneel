@@ -116,8 +116,8 @@
             {{ node_apps|length }} Apps
         </div>
         <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
-            <span style="color: #34d399;">● {{ node_apps|selectattr('is_running')|list|length }} Online</span> · 
-            <span style="color: #94a3b8;">{{ (node_apps|length) - (node_apps|selectattr('is_running')|list|length) }} Stopped</span>
+            <span style="color: #34d399;">● {{ online_count }} Online</span> · 
+            <span style="color: #94a3b8;">{{ stopped_count }} Stopped</span>
         </div>
     </div>
 </div>

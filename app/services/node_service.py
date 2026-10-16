@@ -385,9 +385,15 @@ def update_node_status_in_db(domain: str, status: str, port: int = None, script:
 def get_all_configured_node_apps() -> list:
     """Retrieves all websites configured as Node.js or Next.js along with their runtime stats."""
     try:
+        from app.database import init_db
+        init_db()
+    except Exception:
+        pass
+
+    try:
         conn = get_db()
         cursor = conn.cursor()
-        cursor.execute("SELECT id, domain, root_dir, project_type, node_port, node_script, node_status FROM websites WHERE project_type IN ('nextjs', 'nodejs') ORDER BY id DESC")
+        cursor.execute("SELECT * FROM websites WHERE project_type IN ('nextjs', 'nodejs') ORDER BY id DESC")
         rows = [dict(r) for r in cursor.fetchall()]
         conn.close()
     except Exception:
@@ -395,12 +401,19 @@ def get_all_configured_node_apps() -> list:
 
     for r in rows:
         port = r.get("node_port") or 3000
-        status_info = get_node_app_status(r["domain"], port)
-        r["is_running"] = status_info.get("is_running", False)
-        r["status"] = status_info.get("status", "stopped")
-        r["cpu"] = status_info.get("cpu", "0%")
-        r["memory"] = status_info.get("memory", "0 MB")
-        r["pid"] = status_info.get("pid")
+        try:
+            status_info = get_node_app_status(r.get("domain", ""), port)
+            r["is_running"] = status_info.get("is_running", False)
+            r["status"] = status_info.get("status", "stopped")
+            r["cpu"] = status_info.get("cpu", "0%")
+            r["memory"] = status_info.get("memory", "0 MB")
+            r["pid"] = status_info.get("pid")
+        except Exception:
+            r["is_running"] = False
+            r["status"] = "unknown"
+            r["cpu"] = "0%"
+            r["memory"] = "0 MB"
+            r["pid"] = None
     return rows
 
 def install_node_environment() -> Tuple[bool, str]:

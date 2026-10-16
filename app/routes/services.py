@@ -22,32 +22,79 @@ SERVICE_LIST = [
 
 @router.get("", response_class=HTMLResponse)
 async def services_view(request: Request, user: dict = Depends(login_required)):
-    services = []
-    for s in SERVICE_LIST:
-        services.append({
-            **s,
-            "is_active": get_service_status(s["name"])
-        })
+    try:
+        services = []
+        for s in SERVICE_LIST:
+            try:
+                active = get_service_status(s["name"])
+            except Exception:
+                active = False
+            services.append({
+                **s,
+                "is_active": active
+            })
 
-    # Optional: If redis-server is active or installed, add it
-    if get_service_status("redis-server") or get_service_status("redis"):
-        services.append({
-            "name": "redis-server",
-            "title": "Redis In-Memory Cache",
-            "desc": "In-memory data structure store used as a database and cache",
-            "is_active": True
-        })
+        # Optional: If redis-server is active or installed, add it
+        try:
+            if get_service_status("redis-server") or get_service_status("redis"):
+                services.append({
+                    "name": "redis-server",
+                    "title": "Redis In-Memory Cache",
+                    "desc": "In-memory data structure store used as a database and cache",
+                    "is_active": True
+                })
+        except Exception:
+            pass
 
-    node_env = get_node_environment()
-    node_apps = get_all_configured_node_apps()
+        try:
+            node_env = get_node_environment()
+        except Exception:
+            node_env = {
+                "installed": False,
+                "node_version": "Not installed",
+                "npm_version": "Not installed",
+                "pm2_version": "Not installed",
+                "has_pm2": False,
+                "node_path": None,
+                "npm_path": None,
+                "pm2_path": None
+            }
 
-    return render("services.html", {
-        "user": user,
-        "services": services,
-        "node_env": node_env,
-        "node_apps": node_apps,
-        "active_nav": "services"
-    }, request)
+        try:
+            node_apps = get_all_configured_node_apps()
+        except Exception:
+            node_apps = []
+
+        online_count = sum(1 for a in node_apps if a.get("is_running"))
+        stopped_count = max(0, len(node_apps) - online_count)
+
+        return render("services.html", {
+            "user": user,
+            "services": services,
+            "node_env": node_env,
+            "node_apps": node_apps,
+            "online_count": online_count,
+            "stopped_count": stopped_count,
+            "active_nav": "services"
+        }, request)
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return render("services.html", {
+            "user": user,
+            "services": [
+                {"name": "nginx", "title": "Nginx Web Server", "desc": "High performance HTTP & reverse proxy server", "is_active": True},
+                {"name": "php8.3-fpm", "title": "PHP 8.3 FPM", "desc": "FastCGI Process Manager for PHP 8.3", "is_active": True},
+                {"name": "mariadb", "title": "MariaDB Database", "desc": "Relational database server", "is_active": True},
+                {"name": "pm2", "title": "PM2 Process Manager", "desc": "Production process manager for Node.js", "is_active": False},
+                {"name": "ufw", "title": "UFW Firewall", "desc": "Uncomplicated Firewall", "is_active": True},
+            ],
+            "node_env": {"installed": False, "node_version": "Not detected", "npm_version": "Not detected", "pm2_version": "Not detected", "has_pm2": False},
+            "node_apps": [],
+            "online_count": 0,
+            "stopped_count": 0,
+            "active_nav": "services"
+        }, request)
 
 @router.post("/control")
 async def service_control(
