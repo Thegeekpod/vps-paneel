@@ -1,73 +1,437 @@
 {% extends "base.html" %}
 
-{% block title %}Settings - VPS Control Panel{% endblock %}
-{% block page_title %}Settings & Audit Logs{% endblock %}
+{% block title %}Panel Settings & SSL - VPS Control Panel{% endblock %}
+{% block page_title %}Panel Settings & Security{% endblock %}
 
 {% block content %}
-<div style="display: grid; grid-template-columns: 1fr 2fr; gap: 24px;">
-    <!-- Change Password -->
-    <div class="card" style="height: fit-content;">
-        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">Administrator Security</h3>
-        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 20px;">Update master password for panel access</p>
+<div style="display: flex; flex-direction: column; gap: 24px;">
 
-        {% if error %}
-        <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 10px; border-radius: 8px; font-size: 12px; margin-bottom: 16px;">
-            {{ error }}
-        </div>
-        {% endif %}
-
-        <form method="POST" action="/settings/change-password">
-            <div style="margin-bottom: 14px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Current Password</label>
-                <input type="password" name="old_password" required>
-            </div>
-            <div style="margin-bottom: 14px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">New Password</label>
-                <input type="password" name="new_password" required>
-            </div>
-            <div style="margin-bottom: 20px;">
-                <label style="display: block; font-size: 13px; color: var(--text-secondary); margin-bottom: 6px;">Confirm New Password</label>
-                <input type="password" name="confirm_password" required>
-            </div>
-            <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center;">
-                Update Password
-            </button>
-        </form>
+    {% if error %}
+    <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #f87171; padding: 12px 16px; border-radius: 10px; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+        <span>⚠️ {{ error }}</span>
+        <a href="/settings" style="color: #f87171; text-decoration: none; font-weight: bold;">✕</a>
     </div>
+    {% endif %}
 
-    <!-- Audit Logs -->
-    <div class="card">
-        <h3 style="font-size: 16px; font-weight: 600; margin-bottom: 14px;">Security & Operation Logs</h3>
-        <div class="table-responsive">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Time</th>
-                        <th>User</th>
-                        <th>Action</th>
-                        <th>Details</th>
-                        <th>IP Address</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for log in logs %}
-                    <tr>
-                        <td style="font-size: 12px;">{{ log.created_at }}</td>
-                        <td><span class="badge badge-gray">{{ log.username }}</span></td>
-                        <td><strong>{{ log.action }}</strong></td>
-                        <td style="color: var(--text-secondary); font-size: 12px;">{{ log.details }}</td>
-                        <td><code>{{ log.ip_address }}</code></td>
-                    </tr>
+    {% if success or msg %}
+    <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.3); color: #34d399; padding: 12px 16px; border-radius: 10px; font-size: 13px; display: flex; align-items: center; justify-content: space-between;">
+        <span>✅ {{ msg or 'Operation completed successfully.' }}</span>
+        <a href="/settings" style="color: #34d399; text-decoration: none; font-weight: bold;">✕</a>
+    </div>
+    {% endif %}
+
+    <!-- Status Banner for Active Panel URL -->
+    <div class="card" style="padding: 18px 22px; background: linear-gradient(135deg, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid rgba(56, 189, 248, 0.25);">
+        <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 16px;">
+            <div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+                    <span style="font-size: 18px;">🌐</span>
+                    <span style="font-size: 13px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Active Panel Access URL</span>
+                    {% if ssl_status.is_active %}
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">
+                        🔒 HTTPS Active
+                    </span>
                     {% else %}
-                    <tr>
-                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px;">
-                            No logs found.
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                    <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">
+                        🔓 HTTP (Plain Text)
+                    </span>
+                    {% endif %}
+                </div>
+                <div style="display: flex; align-items: center; gap: 10px; margin-top: 4px;">
+                    <a href="{{ ssl_status.panel_url }}" target="_blank" style="font-size: 17px; font-weight: 700; color: #38bdf8; text-decoration: none; display: inline-flex; align-items: center; gap: 6px;">
+                        {{ ssl_status.panel_url }} <span style="font-size: 13px;">↗</span>
+                    </a>
+                    <button type="button" onclick="navigator.clipboard.writeText('{{ ssl_status.panel_url }}'); alert('Copied panel URL to clipboard!');" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="text-align: right;">
+                    <div style="font-size: 11px; color: var(--text-muted);">Server IPv4</div>
+                    <code style="font-size: 13px; color: #f8fafc; font-weight: 600;">{{ ssl_status.server_ip }}</code>
+                </div>
+                <div style="width: 1px; height: 32px; background: var(--border);"></div>
+                <div style="text-align: right;">
+                    <div style="font-size: 11px; color: var(--text-muted);">Port</div>
+                    <code style="font-size: 13px; color: #f8fafc; font-weight: 600;">:{{ ssl_status.panel_port }}</code>
+                </div>
+            </div>
         </div>
     </div>
+
+    <!-- Main Settings Layout -->
+    <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 24px;">
+
+        <!-- LEFT COLUMN: Panel Domain & SSL Configuration -->
+        <div style="display: flex; flex-direction: column; gap: 24px;">
+
+            <!-- Panel Domain & Let's Encrypt / Self-Signed SSL -->
+            <div class="card">
+                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border);">
+                    <div>
+                        <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+                            <span>🔐</span> Panel Domain & SSL Certificate
+                        </h3>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+                            Configure a dedicated domain (e.g. <code>panel.yourdomain.com</code>) or manage SSL encryption for panel access.
+                        </p>
+                    </div>
+                    {% if ssl_status.is_active %}
+                        {% if ssl_status.ssl_type == 'letsencrypt' %}
+                        <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 12px; padding: 4px 10px;">
+                            ✓ Trusted Let's Encrypt
+                        </span>
+                        {% else %}
+                        <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); font-size: 12px; padding: 4px 10px;">
+                            ✓ Self-Signed (IP)
+                        </span>
+                        {% endif %}
+                    {% else %}
+                    <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 12px; padding: 4px 10px;">
+                        No SSL (HTTP)
+                    </span>
+                    {% endif %}
+                </div>
+
+                <!-- 1. Panel Domain Form -->
+                <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border); border-radius: 12px; padding: 18px; margin-bottom: 20px;">
+                    <label style="display: block; font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">
+                        Panel Domain Name
+                    </label>
+                    <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 12px; line-height: 1.5;">
+                        Enter a domain or subdomain pointed to this VPS (e.g., <code>panel.yourdomain.com</code>). Leave blank to access panel via server IP.
+                    </p>
+
+                    <form method="POST" action="/settings/domain" id="domainForm" style="display: flex; gap: 10px; align-items: center; margin-bottom: 10px;">
+                        <input type="text" name="panel_domain" id="panelDomainInput" value="{{ ssl_status.panel_domain }}" 
+                               placeholder="e.g. panel.yourdomain.com"
+                               style="flex: 1; padding: 8px 14px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; font-size: 14px; font-family: monospace;">
+                        <button type="submit" class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px; white-space: nowrap;">
+                            Save Domain
+                        </button>
+                        <button type="button" onclick="testPanelDns()" class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px; white-space: nowrap; border-color: rgba(56, 189, 248, 0.35); color: #38bdf8;">
+                            🔍 Test DNS
+                        </button>
+                    </form>
+
+                    <!-- DNS Test Feedback Box -->
+                    <div id="dnsResultBox" style="display: none; margin-top: 10px; padding: 12px; border-radius: 8px; font-size: 12px; line-height: 1.5;"></div>
+                </div>
+
+                <!-- 2. Active Certificate Details -->
+                {% if ssl_status.has_cert %}
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 24px; padding: 14px; background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 10px;">
+                    <div>
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Issuer</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #f8fafc; margin-top: 2px;">{{ ssl_status.issuer }}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Subject / Host</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #38bdf8; margin-top: 2px;">{{ ssl_status.subject_cn or ssl_status.panel_domain or ssl_status.server_ip }}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">Expires At</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #f8fafc; margin-top: 2px;">
+                            {{ ssl_status.expiry or 'Valid' }}
+                            {% if ssl_status.days_left is not none %}
+                            <span style="font-size: 11px; color: #34d399;">({{ ssl_status.days_left }} days left)</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
+                <!-- 3. SSL Issuance Options -->
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+
+                    <!-- Option A: Let's Encrypt SSL (For Domain) -->
+                    <div style="background: rgba(16, 185, 129, 0.04); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <span style="font-size: 18px;">🔒</span>
+                                <h4 style="font-size: 14px; font-weight: 700; color: #34d399;">Let's Encrypt SSL (Recommended)</h4>
+                            </div>
+                            <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px;">
+                                100% free, trusted public SSL certificate with no browser warnings. Requires a domain name pointing to this server's IP.
+                            </p>
+                            <div style="margin-bottom: 12px;">
+                                <label style="display: block; font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">Admin Email (For Expire Alerts)</label>
+                                <input type="email" id="letsencryptEmail" placeholder="admin@{{ ssl_status.panel_domain or 'yourdomain.com' }}" 
+                                       style="width: 100%; padding: 6px 10px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; font-size: 12px;">
+                            </div>
+                        </div>
+
+                        <button type="button" id="btnIssueLetsEncrypt" onclick="issuePanelLetsEncrypt()" class="btn btn-primary" style="width: 100%; justify-content: center; gap: 6px; background: #059669; border-color: #10b981;">
+                            <span>🔒</span> Issue Let's Encrypt SSL
+                        </button>
+                    </div>
+
+                    <!-- Option B: Self-Signed SSL (For IP) -->
+                    <div style="background: rgba(56, 189, 248, 0.04); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 12px; padding: 18px; display: flex; flex-direction: column; justify-content: space-between;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                                <span style="font-size: 18px;">🛡️</span>
+                                <h4 style="font-size: 14px; font-weight: 700; color: #38bdf8;">Self-Signed SSL (For IP Access)</h4>
+                            </div>
+                            <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px;">
+                                Enables HTTPS immediately directly on your IP address (<code>https://{{ ssl_status.server_ip }}:8443</code>). Browser will show standard self-signed security screen.
+                            </p>
+                            <div style="padding: 8px; background: rgba(56, 189, 248, 0.06); border-radius: 6px; font-size: 11px; color: #94a3b8; margin-bottom: 12px;">
+                                💡 Useful if you do not have a custom domain yet or want instant encryption.
+                            </div>
+                        </div>
+
+                        <button type="button" id="btnGenerateSelfSigned" onclick="generatePanelSelfSigned()" class="btn btn-secondary" style="width: 100%; justify-content: center; gap: 6px; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;">
+                            <span>🛡️</span> Generate Self-Signed SSL
+                        </button>
+                    </div>
+
+                </div>
+
+                <!-- 4. SSL Management & Service Controls -->
+                <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 14px; border-top: 1px solid var(--border);">
+                    <div style="font-size: 12px; color: var(--text-muted);">
+                        Certificates are kept at: <code style="color: #94a3b8;">/opt/vps-panel/data/ssl/</code>
+                    </div>
+                    <div style="display: flex; gap: 10px;">
+                        {% if ssl_status.has_cert and ssl_status.is_active %}
+                        <button type="button" onclick="disablePanelSsl()" class="btn btn-danger" style="padding: 6px 14px; font-size: 12px; gap: 6px;">
+                            <span>🚫</span> Disable SSL (Revert to HTTP)
+                        </button>
+                        {% endif %}
+                        <button type="button" onclick="restartPanelService()" class="btn btn-secondary" style="padding: 6px 14px; font-size: 12px; gap: 6px;">
+                            <span>🔄</span> Restart Panel Service
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+        <!-- RIGHT COLUMN: Administrator Security & System Info -->
+        <div style="display: flex; flex-direction: column; gap: 24px;">
+
+            <!-- Change Master Password -->
+            <div class="card">
+                <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                    <span>🔑</span> Master Password
+                </h3>
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 16px;">
+                    Update administrator password for panel login.
+                </p>
+
+                <form method="POST" action="/settings/change-password">
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Current Password</label>
+                        <input type="password" name="old_password" required style="width: 100%; padding: 7px 12px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; font-size: 13px;">
+                    </div>
+                    <div style="margin-bottom: 12px;">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">New Password</label>
+                        <input type="password" name="new_password" required style="width: 100%; padding: 7px 12px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; font-size: 13px;">
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">Confirm New Password</label>
+                        <input type="password" name="confirm_password" required style="width: 100%; padding: 7px 12px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 6px; font-size: 13px;">
+                    </div>
+                    <button type="submit" class="btn btn-primary" style="width: 100%; justify-content: center; font-size: 13px; padding: 8px 16px;">
+                        Update Password
+                    </button>
+                </form>
+            </div>
+
+            <!-- Panel Updates & Quick Links -->
+            <div class="card">
+                <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                    <span>⚡</span> System & Logs
+                </h3>
+                <p style="font-size: 12px; color: var(--text-muted); margin-bottom: 14px;">
+                    Quick navigation and maintenance
+                </p>
+
+                <div style="display: flex; flex-direction: column; gap: 10px;">
+                    <a href="/logs" class="btn btn-secondary" style="justify-content: space-between; font-size: 13px; padding: 8px 14px;">
+                        <span style="display: inline-flex; align-items: center; gap: 8px;">
+                            <span>📋</span> Security & Audit Logs
+                        </span>
+                        <span style="color: var(--text-muted);">View &rarr;</span>
+                    </a>
+
+                    <button type="button" onclick="openUpdateModal()" class="btn btn-secondary" style="justify-content: space-between; font-size: 13px; padding: 8px 14px;">
+                        <span style="display: inline-flex; align-items: center; gap: 8px;">
+                            <span>🔄</span> Check for Panel Updates
+                        </span>
+                        <span style="color: #38bdf8;">v2.0</span>
+                    </button>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
 </div>
+
+<!-- Interactive JS Logic -->
+<script>
+async function testPanelDns() {
+    const domain = document.getElementById('panelDomainInput').value.trim();
+    const box = document.getElementById('dnsResultBox');
+    if (!domain) {
+        alert('Please enter a domain name first.');
+        return;
+    }
+
+    box.style.display = 'block';
+    box.style.background = 'rgba(56, 189, 248, 0.1)';
+    box.style.color = '#38bdf8';
+    box.style.border = '1px solid rgba(56, 189, 248, 0.3)';
+    box.innerHTML = '⏳ Testing DNS resolution for <strong>' + domain + '</strong>...';
+
+    try {
+        const resp = await fetch('/settings/check-domain', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain: domain })
+        });
+        const data = await resp.json();
+
+        if (data.matches_server) {
+            box.style.background = 'rgba(16, 185, 129, 0.15)';
+            box.style.color = '#34d399';
+            box.style.border = '1px solid rgba(16, 185, 129, 0.3)';
+            box.innerHTML = '✅ <strong>DNS Match!</strong> ' + domain + ' resolves directly to this server IP (<code>' + data.server_ip + '</code>). You can now issue a Let\'s Encrypt SSL certificate!';
+        } else if (data.is_cloudflare) {
+            box.style.background = 'rgba(245, 158, 11, 0.15)';
+            box.style.color = '#fbbf24';
+            box.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+            box.innerHTML = '⚠️ <strong>Cloudflare Proxy Detected:</strong> ' + domain + ' resolves to Cloudflare. If your Cloudflare DNS A-record points to ' + data.server_ip + ', ensure SSL mode is Full or switch to DNS Only for initial challenge.';
+        } else {
+            box.style.background = 'rgba(239, 68, 68, 0.15)';
+            box.style.color = '#f87171';
+            box.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+            box.innerHTML = '❌ <strong>DNS Mismatch:</strong> ' + domain + ' resolves to <code>' + (data.resolved_ips.join(', ') || 'No IP') + '</code>, but this server is <code>' + data.server_ip + '</code>. Please update your DNS A-record at your registrar first.';
+        }
+    } catch (e) {
+        box.style.background = 'rgba(239, 68, 68, 0.15)';
+        box.style.color = '#f87171';
+        box.style.border = '1px solid rgba(239, 68, 68, 0.3)';
+        box.innerHTML = 'Error checking DNS: ' + e;
+    }
+}
+
+async function issuePanelLetsEncrypt() {
+    const domain = document.getElementById('panelDomainInput').value.trim();
+    const email = document.getElementById('letsencryptEmail').value.trim();
+    const btn = document.getElementById('btnIssueLetsEncrypt');
+
+    if (!domain) {
+        alert('Please specify your panel domain name (e.g. panel.yourdomain.com) above and save it first.');
+        return;
+    }
+
+    if (!confirm('Issue a Let\'s Encrypt SSL certificate for ' + domain + ' and enable HTTPS on port 8443?')) {
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Verifying & Issuing SSL...';
+
+    const formData = new FormData();
+    formData.append('domain', domain);
+    formData.append('email', email);
+
+    try {
+        const resp = await fetch('/settings/ssl/issue-letsencrypt', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            alert('🎉 ' + data.message + '\n\nThe panel is reloading with SSL. You will be redirected to the secure URL in 3 seconds.');
+            setTimeout(() => {
+                window.location.href = 'https://' + domain + ':{{ ssl_status.panel_port }}/settings';
+            }, 3000);
+        } else {
+            alert('❌ SSL Issuance Failed:\n' + (data.error || 'Unknown error occurred.'));
+            btn.disabled = false;
+            btn.innerHTML = '<span>🔒</span> Issue Let\'s Encrypt SSL';
+        }
+    } catch (e) {
+        alert('Error communicating with server: ' + e);
+        btn.disabled = false;
+        btn.innerHTML = '<span>🔒</span> Issue Let\'s Encrypt SSL';
+    }
+}
+
+async function generatePanelSelfSigned() {
+    const btn = document.getElementById('btnGenerateSelfSigned');
+    if (!confirm('Generate a Self-Signed SSL certificate for this server and enable HTTPS on port 8443?')) {
+        return;
+    }
+
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Generating Certificate...';
+
+    try {
+        const resp = await fetch('/settings/ssl/generate-self-signed', {
+            method: 'POST'
+        });
+        const data = await resp.json();
+
+        if (data.success) {
+            alert('🛡️ ' + data.message + '\n\nYou will be redirected to HTTPS. Accept the self-signed browser security prompt to continue.');
+            setTimeout(() => {
+                const targetHost = document.getElementById('panelDomainInput').value.trim() || '{{ ssl_status.server_ip }}';
+                window.location.href = 'https://' + targetHost + ':{{ ssl_status.panel_port }}/settings';
+            }, 3000);
+        } else {
+            alert('❌ Failed to generate self-signed certificate: ' + data.error);
+            btn.disabled = false;
+            btn.innerHTML = '<span>🛡️</span> Generate Self-Signed SSL';
+        }
+    } catch (e) {
+        alert('Error: ' + e);
+        btn.disabled = false;
+        btn.innerHTML = '<span>🛡️</span> Generate Self-Signed SSL';
+    }
+}
+
+async function disablePanelSsl() {
+    if (!confirm('Disable SSL and revert the panel to plain HTTP on port 8443?')) {
+        return;
+    }
+
+    try {
+        const resp = await fetch('/settings/ssl/disable', { method: 'POST' });
+        const data = await resp.json();
+        if (data.success) {
+            alert(data.message);
+            setTimeout(() => {
+                const targetHost = document.getElementById('panelDomainInput').value.trim() || '{{ ssl_status.server_ip }}';
+                window.location.href = 'http://' + targetHost + ':{{ ssl_status.panel_port }}/settings';
+            }, 2500);
+        } else {
+            alert('Error: ' + data.error);
+        }
+    } catch (e) {
+        alert('Error: ' + e);
+    }
+}
+
+async function restartPanelService() {
+    if (!confirm('Restart the VPS Control Panel service now?')) return;
+    try {
+        const resp = await fetch('/settings/restart-service', { method: 'POST' });
+        const data = await resp.json();
+        alert(data.message + ' Page will refresh in 3 seconds.');
+        setTimeout(() => { window.location.reload(); }, 3000);
+    } catch (e) {
+        alert('Error: ' + e);
+    }
+}
+</script>
 {% endblock %}

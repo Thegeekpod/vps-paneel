@@ -115,6 +115,15 @@ def init_db():
     )
     ''')
 
+    # Panel Settings Table (key-value)
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS panel_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
     # Default admin user if none exists
     cursor.execute("SELECT COUNT(*) FROM users")
     if cursor.fetchone()[0] == 0:
@@ -124,6 +133,44 @@ def init_db():
 
     conn.commit()
     conn.close()
+
+def get_panel_setting(key: str, default: str = "") -> str:
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM panel_settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        conn.close()
+        if row and row["value"] is not None:
+            return row["value"]
+        return default
+    except Exception:
+        return default
+
+def set_panel_setting(key: str, value: str):
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT INTO panel_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+            (key, str(value))
+        )
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass
+
+def get_all_panel_settings() -> dict:
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT key, value FROM panel_settings")
+        rows = cursor.fetchall()
+        conn.close()
+        return {r["key"]: r["value"] for r in rows}
+    except Exception:
+        return {}
 
 def log_action(username: str, action: str, details: str = "", ip_address: str = "127.0.0.1"):
     try:

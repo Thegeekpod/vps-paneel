@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}Audit & System Logs - VPS Control Panel{% endblock %}
+{% block page_title %}Security & Operation Logs{% endblock %}
+
+{% block content %}
+<div style="display: flex; flex-direction: column; gap: 20px;">
+    <!-- Top Filter & Action Bar -->
+    <div class="card" style="padding: 16px 20px;">
+        <form method="GET" action="/logs" style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
+            <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
+                <!-- Filter by Action -->
+                <div>
+                    <select name="action" style="padding: 7px 12px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; font-size: 13px;">
+                        <option value="">All Actions</option>
+                        {% for act in available_actions %}
+                        <option value="{{ act }}" {% if selected_action == act %}selected{% endif %}>{{ act }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+
+                <!-- Search Input -->
+                <div style="position: relative;">
+                    <input type="text" name="search" value="{{ search_term }}" placeholder="Search details, user, IP..." 
+                           style="padding: 7px 12px 7px 30px; width: 240px; background: var(--bg-main); border: 1px solid var(--border); color: var(--text-primary); border-radius: 8px; font-size: 13px;">
+                    <span style="position: absolute; left: 10px; top: 8px; color: var(--text-muted); font-size: 12px;">🔍</span>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="padding: 7px 14px; font-size: 13px;">
+                    Filter Logs
+                </button>
+
+                {% if selected_action or search_term %}
+                <a href="/logs" class="btn btn-secondary" style="padding: 7px 12px; font-size: 13px;">
+                    Clear Filter
+                </a>
+                {% endif %}
+            </div>
+
+            <!-- Export & Clear Logs Actions -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <a href="/logs/export" class="btn btn-secondary" style="padding: 7px 14px; font-size: 13px; gap: 6px;">
+                    <span>📥</span> Export CSV
+                </a>
+                <button type="button" onclick="confirmClearLogs()" class="btn btn-danger" style="padding: 7px 14px; font-size: 13px; gap: 6px;">
+                    <span>🗑️</span> Purge Logs
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Stats Summary Row -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px;">
+        <div class="card" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Total Logs</div>
+                <div style="font-size: 22px; font-weight: 700; color: #38bdf8; margin-top: 4px;">{{ total_logs_count }}</div>
+            </div>
+            <div style="font-size: 28px; opacity: 0.3;">📋</div>
+        </div>
+        <div class="card" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Showing Records</div>
+                <div style="font-size: 22px; font-weight: 700; color: #34d399; margin-top: 4px;">{{ logs|length }}</div>
+            </div>
+            <div style="font-size: 28px; opacity: 0.3;">🔍</div>
+        </div>
+        <div class="card" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
+            <div>
+                <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px;">Active Filter</div>
+                <div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-top: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px;">
+                    {{ selected_action if selected_action else (search_term if search_term else 'None (All)') }}
+                </div>
+            </div>
+            <div style="font-size: 28px; opacity: 0.3;">🛡️</div>
+        </div>
+    </div>
+
+    <!-- Logs Table -->
+    <div class="card" style="padding: 0; overflow: hidden;">
+        <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between;">
+            <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">
+                Operation & Security Trail
+            </div>
+            <span style="font-size: 12px; color: var(--text-muted);">
+                Displaying most recent events first
+            </span>
+        </div>
+
+        <div class="table-responsive">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 170px;">Timestamp</th>
+                        <th style="width: 120px;">User</th>
+                        <th style="width: 180px;">Action</th>
+                        <th>Details & Operation Summary</th>
+                        <th style="width: 140px;">Client IP</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for log in logs %}
+                    <tr>
+                        <td style="font-size: 12px; color: var(--text-secondary); white-space: nowrap;">
+                            {{ log.created_at }}
+                        </td>
+                        <td>
+                            <span class="badge badge-gray" style="font-size: 11px; font-weight: 600;">{{ log.username }}</span>
+                        </td>
+                        <td>
+                            {% if 'SSL' in log.action or 'Cert' in log.action %}
+                            <span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);">{{ log.action }}</span>
+                            {% elif 'Login' in log.action %}
+                            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3);">{{ log.action }}</span>
+                            {% elif 'Delete' in log.action or 'Clear' in log.action or 'Purge' in log.action %}
+                            <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);">{{ log.action }}</span>
+                            {% elif 'Password' in log.action or 'Security' in log.action %}
+                            <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3);">{{ log.action }}</span>
+                            {% else %}
+                            <strong style="color: var(--text-primary); font-size: 12px;">{{ log.action }}</strong>
+                            {% endif %}
+                        </td>
+                        <td style="color: var(--text-secondary); font-size: 13px; line-height: 1.5;">
+                            {{ log.details }}
+                        </td>
+                        <td>
+                            <code style="font-size: 11px; background: rgba(255,255,255,0.04); padding: 3px 6px; border-radius: 4px; border: 1px solid var(--border);">{{ log.ip_address }}</code>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 60px 20px;">
+                            <div style="font-size: 36px; margin-bottom: 12px; opacity: 0.5;">📭</div>
+                            <div style="font-size: 15px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px;">No Audit Logs Found</div>
+                            <div style="font-size: 13px; color: var(--text-muted);">Events and user actions will be recorded here automatically.</div>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Clear Logs Confirmation Modal -->
+<div id="clearLogsModal" style="display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(4px); z-index: 9999; align-items: center; justify-content: center;">
+    <div class="card" style="max-width: 440px; width: 90%; padding: 24px; border: 1px solid var(--border);">
+        <div style="font-size: 28px; margin-bottom: 12px;">⚠️</div>
+        <h3 style="font-size: 17px; font-weight: 700; color: #f87171; margin-bottom: 8px;">Purge All Audit Logs?</h3>
+        <p style="font-size: 13px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 20px;">
+            This will permanently delete all recorded user activity and security audit history from the database. This action cannot be undone.
+        </p>
+        <div style="display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" onclick="closeClearLogsModal()" class="btn btn-secondary" style="padding: 8px 16px; font-size: 13px;">Cancel</button>
+            <form method="POST" action="/logs/clear" style="margin: 0;">
+                <button type="submit" class="btn btn-danger" style="padding: 8px 16px; font-size: 13px;">Yes, Purge Logs</button>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function confirmClearLogs() {
+    const modal = document.getElementById('clearLogsModal');
+    modal.style.display = 'flex';
+}
+function closeClearLogsModal() {
+    const modal = document.getElementById('clearLogsModal');
+    modal.style.display = 'none';
+}
+</script>
+{% endblock %}
