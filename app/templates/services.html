@@ -4,17 +4,27 @@
 {% block page_title %}System Services & Firewall{% endblock %}
 
 {% block content %}
-<div style="margin-bottom: 24px;">
-    <h2 style="font-size: 18px; font-weight: 600;">Managed Daemons</h2>
-    <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Monitor and restart vital hosting server components</p>
+<div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 12px;">
+    <div>
+        <h2 style="font-size: 18px; font-weight: 600;">Managed Daemons</h2>
+        <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Monitor and restart vital hosting server components</p>
+    </div>
+    {% if not node_env.installed or not node_env.has_pm2 %}
+    <button onclick="installNodeEnvironment()" id="btnInstallNodeTop" class="btn btn-primary" style="font-size: 12px; display: inline-flex; align-items: center; gap: 6px;">
+        <span>⚡</span> Install Node.js 20 LTS & PM2
+    </button>
+    {% endif %}
 </div>
 
-<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px;">
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin-bottom: 36px;">
     {% for s in services %}
     <div class="card">
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
             <div>
-                <h3 style="font-size: 16px; font-weight: 600;">{{ s.title }}</h3>
+                <h3 style="font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+                    {% if s.name == 'pm2' %}⚡{% elif s.name == 'nginx' %}🌐{% elif s.name.startswith('php') %}🐘{% elif s.name == 'mariadb' %}🗄️{% elif s.name == 'ufw' %}🛡️{% else %}⚙️{% endif %}
+                    {{ s.title }}
+                </h3>
                 <code style="font-size: 11px; color: var(--text-muted);">{{ s.name }}</code>
             </div>
             {% if s.is_active %}
@@ -44,6 +54,170 @@
     </div>
     {% endfor %}
 </div>
+
+<!-- Node.js & Application Runtime Section -->
+<div style="margin-bottom: 20px;">
+    <h2 style="font-size: 18px; font-weight: 600; display: flex; align-items: center; gap: 8px;">
+        <span>▲</span> Node.js & Next.js Runtime Environment
+    </h2>
+    <p style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">Node.js engine versions, PM2 daemon supervision, and active website instances</p>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+    <!-- Node.js Card -->
+    <div class="card" style="padding: 16px;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <span>Runtime Engine</span>
+            <span>🟢</span>
+        </div>
+        <div style="font-size: 18px; font-weight: 700; color: {% if node_env.installed %}#34d399{% else %}#f87171{% endif %};">
+            Node.js {{ node_env.node_version }}
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ node_env.node_path or 'Not installed' }}">
+            Binary: {{ node_env.node_path or 'Not found in PATH' }}
+        </div>
+    </div>
+
+    <!-- NPM Card -->
+    <div class="card" style="padding: 16px;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <span>Package Manager</span>
+            <span>📦</span>
+        </div>
+        <div style="font-size: 18px; font-weight: 700; color: #38bdf8;">
+            NPM {{ node_env.npm_version }}
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ node_env.npm_path or 'Not installed' }}">
+            Binary: {{ node_env.npm_path or 'Not found in PATH' }}
+        </div>
+    </div>
+
+    <!-- PM2 Card -->
+    <div class="card" style="padding: 16px;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <span>Process Supervisor</span>
+            <span>⚡</span>
+        </div>
+        <div style="font-size: 18px; font-weight: 700; color: {% if node_env.has_pm2 %}#a855f7{% else %}#f87171{% endif %};">
+            PM2 {{ node_env.pm2_version }}
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ node_env.pm2_path or 'Not installed' }}">
+            Status: {% if node_env.has_pm2 %}<span style="color: #34d399;">Active Supervisor</span>{% else %}<span style="color: #f87171;">Not installed</span>{% endif %}
+        </div>
+    </div>
+
+    <!-- Configured Apps Card -->
+    <div class="card" style="padding: 16px;">
+        <div style="font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-muted); margin-bottom: 6px; display: flex; justify-content: space-between; align-items: center;">
+            <span>Managed Web Apps</span>
+            <span>🚀</span>
+        </div>
+        <div style="font-size: 18px; font-weight: 700; color: #f8fafc;">
+            {{ node_apps|length }} Apps
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+            <span style="color: #34d399;">● {{ node_apps|selectattr('is_running')|list|length }} Online</span> · 
+            <span style="color: #94a3b8;">{{ (node_apps|length) - (node_apps|selectattr('is_running')|list|length) }} Stopped</span>
+        </div>
+    </div>
+</div>
+
+<!-- Active Node.js / Next.js Websites List -->
+<div class="card" style="padding: 0; overflow: hidden; margin-bottom: 30px;">
+    <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.4); flex-wrap: wrap; gap: 10px;">
+        <div>
+            <h3 style="font-size: 15px; font-weight: 600;">Active Next.js & Node.js Website Processes</h3>
+            <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">Processes supervised by PM2 and proxied by Nginx</p>
+        </div>
+        <a href="/websites" class="btn btn-secondary" style="font-size: 12px; padding: 5px 12px;">
+            + Manage in Websites
+        </a>
+    </div>
+
+    {% if node_apps and node_apps|length > 0 %}
+    <div style="overflow-x: auto;">
+        <table class="table" style="margin: 0; width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="border-bottom: 1px solid var(--border); background: rgba(15, 23, 42, 0.2);">
+                    <th style="padding: 12px 20px; text-align: left; font-size: 12px; color: var(--text-muted);">Application / Domain</th>
+                    <th style="padding: 12px 16px; text-align: left; font-size: 12px; color: var(--text-muted);">Framework</th>
+                    <th style="padding: 12px 16px; text-align: left; font-size: 12px; color: var(--text-muted);">Port Binding</th>
+                    <th style="padding: 12px 16px; text-align: left; font-size: 12px; color: var(--text-muted);">CPU / Memory</th>
+                    <th style="padding: 12px 16px; text-align: left; font-size: 12px; color: var(--text-muted);">Status</th>
+                    <th style="padding: 12px 20px; text-align: right; font-size: 12px; color: var(--text-muted);">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for app in node_apps %}
+                <tr style="border-bottom: 1px solid var(--border);">
+                    <td style="padding: 14px 20px;">
+                        <a href="https://{{ app.domain }}" target="_blank" style="color: var(--accent); font-weight: 600; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+                            {{ app.domain }} <span style="font-size: 11px;">↗</span>
+                        </a>
+                        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">{{ app.root_dir }}</div>
+                    </td>
+                    <td style="padding: 14px 16px;">
+                        {% if app.project_type == 'nextjs' %}
+                        <span class="badge" style="background: rgba(255, 255, 255, 0.1); color: #f8fafc; border: 1px solid rgba(255, 255, 255, 0.2);">▲ Next.js</span>
+                        {% else %}
+                        <span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.3);">🟢 Node.js</span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 14px 16px;">
+                        <code style="background: rgba(15, 23, 42, 0.8); padding: 3px 8px; border-radius: 4px; font-size: 12px; color: #38bdf8;">127.0.0.1:{{ app.node_port or 3000 }}</code>
+                    </td>
+                    <td style="padding: 14px 16px; font-size: 12px;">
+                        <span style="color: var(--text-secondary);">{{ app.memory }}</span> · 
+                        <span style="color: var(--text-muted);">{{ app.cpu }}</span>
+                    </td>
+                    <td style="padding: 14px 16px;">
+                        {% if app.is_running %}
+                        <span class="badge badge-success" style="display: inline-flex; align-items: center; gap: 4px;">
+                            <span style="font-size: 8px;">●</span> Online
+                        </span>
+                        {% else %}
+                        <span class="badge badge-danger" style="display: inline-flex; align-items: center; gap: 4px;">
+                            <span style="font-size: 8px;">●</span> Stopped
+                        </span>
+                        {% endif %}
+                    </td>
+                    <td style="padding: 14px 20px; text-align: right;">
+                        <div style="display: inline-flex; gap: 6px;">
+                            <button onclick="controlNodeApp({{ app.id }}, 'restart', '{{ app.domain }}')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" title="Restart Process">
+                                🔄
+                            </button>
+                            {% if app.is_running %}
+                            <button onclick="controlNodeApp({{ app.id }}, 'stop', '{{ app.domain }}')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px; color: #f87171;" title="Stop Process">
+                                ⏹
+                            </button>
+                            {% else %}
+                            <button onclick="controlNodeApp({{ app.id }}, 'start', '{{ app.domain }}')" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px; color: #34d399;" title="Start Process">
+                                ▶
+                            </button>
+                            {% endif %}
+                            <a href="/websites" class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px;" title="Open Process Manager in Websites">
+                                ⚙️
+                            </a>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div style="padding: 32px 20px; text-align: center;">
+        <div style="font-size: 28px; margin-bottom: 8px; opacity: 0.6;">▲</div>
+        <h4 style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">No Next.js or Node.js Applications Yet</h4>
+        <p style="font-size: 13px; color: var(--text-muted); max-width: 480px; margin: 0 auto 16px auto;">
+            Deploy a Node.js or Next.js app on this server anytime in the Websites section. The panel automatically handles PM2 supervision and Nginx reverse proxying.
+        </p>
+        <a href="/websites" class="btn btn-primary" style="font-size: 12px; padding: 6px 14px;">
+            + Create Next.js / Node.js Site
+        </a>
+    </div>
+    {% endif %}
+</div>
 {% endblock %}
 
 {% block scripts %}
@@ -58,6 +232,36 @@ async function controlService(name, action) {
     const data = await res.json();
     showToast(data.message, data.success ? 'success' : 'danger');
     setTimeout(() => location.reload(), 1500);
+}
+
+async function controlNodeApp(siteId, action, domain) {
+    showToast(`${action.toUpperCase()} requested for ${domain}...`, 'success');
+    try {
+        const res = await fetch(`/websites/${siteId}/node/${action}`, { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message || `${action} complete`, data.success ? 'success' : 'danger');
+        setTimeout(() => location.reload(), 1200);
+    } catch (e) {
+        showToast(`Request failed: ${e}`, 'danger');
+    }
+}
+
+async function installNodeEnvironment() {
+    const btn = document.getElementById("btnInstallNodeTop");
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = `<span>⏳</span> Installing Node.js 20 LTS & PM2...`;
+    }
+    showToast("Installing Node.js (v20 LTS), NPM & PM2 in background...", "success");
+    try {
+        const res = await fetch('/services/install-node', { method: 'POST' });
+        const data = await res.json();
+        showToast(data.message, data.success ? 'success' : 'danger');
+        setTimeout(() => location.reload(), 2000);
+    } catch (e) {
+        showToast(`Install error: ${e}`, 'danger');
+        if (btn) btn.disabled = false;
+    }
 }
 </script>
 {% endblock %}

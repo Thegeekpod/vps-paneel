@@ -381,3 +381,39 @@ def update_node_status_in_db(domain: str, status: str, port: int = None, script:
         conn.close()
     except Exception:
         pass
+
+def get_all_configured_node_apps() -> list:
+    """Retrieves all websites configured as Node.js or Next.js along with their runtime stats."""
+    try:
+        conn = get_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, domain, root_dir, project_type, node_port, node_script, node_status FROM websites WHERE project_type IN ('nextjs', 'nodejs') ORDER BY id DESC")
+        rows = [dict(r) for r in cursor.fetchall()]
+        conn.close()
+    except Exception:
+        return []
+
+    for r in rows:
+        port = r.get("node_port") or 3000
+        status_info = get_node_app_status(r["domain"], port)
+        r["is_running"] = status_info.get("is_running", False)
+        r["status"] = status_info.get("status", "stopped")
+        r["cpu"] = status_info.get("cpu", "0%")
+        r["memory"] = status_info.get("memory", "0 MB")
+        r["pid"] = status_info.get("pid")
+    return rows
+
+def install_node_environment() -> Tuple[bool, str]:
+    """Installs Node.js LTS, NPM, and PM2 globally if missing."""
+    if os.name == 'nt':
+        return True, "Simulated Node.js installation on Windows."
+    try:
+        cmd = "curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && apt-get install -y nodejs && npm install -g pm2"
+        res = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=180)
+        if res.returncode == 0:
+            return True, "Node.js (v20 LTS), NPM, and PM2 installed successfully!"
+        else:
+            return False, f"Installation failed: {res.stderr.strip() or res.stdout.strip()}"
+    except Exception as e:
+        return False, f"Installation error: {e}"
+

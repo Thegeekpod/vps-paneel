@@ -49,8 +49,27 @@ def get_system_stats() -> Dict[str, Any]:
 def get_service_status(service_name: str) -> bool:
     if os.name == 'nt':
         return True
+    if service_name == "pm2":
+        try:
+            from app.services.node_service import find_binary
+            pm2_bin = find_binary("pm2")
+            if pm2_bin:
+                res = subprocess.run([pm2_bin, "ping"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+                if res.returncode == 0:
+                    return True
+        except Exception:
+            pass
+        for unit in ["pm2-root", "pm2"]:
+            try:
+                res = subprocess.run(["systemctl", "is-active", unit], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+                if res.stdout.strip() == "active":
+                    return True
+            except Exception:
+                pass
+        return False
+
     try:
-        res = subprocess.run(["systemctl", "is-active", service_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(["systemctl", "is-active", service_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
         return res.stdout.strip() == "active"
     except Exception:
         return False
@@ -60,8 +79,40 @@ def control_service(service_name: str, action: str) -> bool:
         return True
     if action not in ["restart", "reload", "start", "stop"]:
         return False
+
+    if service_name == "pm2":
+        try:
+            from app.services.node_service import find_binary
+            pm2_bin = find_binary("pm2")
+            if pm2_bin:
+                if action == "restart":
+                    res = subprocess.run([pm2_bin, "restart", "all"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                    return res.returncode == 0
+                elif action == "reload":
+                    res = subprocess.run([pm2_bin, "reload", "all"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                    return res.returncode == 0
+                elif action == "stop":
+                    res = subprocess.run([pm2_bin, "stop", "all"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                    return res.returncode == 0
+                elif action == "start":
+                    res = subprocess.run([pm2_bin, "resurrect"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                    if res.returncode != 0:
+                        res = subprocess.run([pm2_bin, "start", "all"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                    return res.returncode == 0
+        except Exception:
+            pass
+
+        for unit in ["pm2-root", "pm2"]:
+            try:
+                res = subprocess.run(["systemctl", action, unit], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
+                if res.returncode == 0:
+                    return True
+            except Exception:
+                pass
+        return False
+
     try:
-        res = subprocess.run(["systemctl", action, service_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        res = subprocess.run(["systemctl", action, service_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
         return res.returncode == 0
     except Exception:
         return False
